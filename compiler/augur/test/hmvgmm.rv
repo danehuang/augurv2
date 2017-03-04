@@ -1,0 +1,11 @@
+(K : Int, N : Int, alpha : Vec Real, mu0 : Vec Real, covs0 : Mat Real, df : Int, scale0 : Mat Real) => {
+  param pis ~ Dirichlet(alpha) ;
+  param mu[k] ~ MvNormal(mu0, covs0)
+      for k <- 0 until K ;
+  param cov[k] ~ InvWishart(df, scale0)
+      for k <- 0 until K ;
+  param z[n] ~ Categorical(pis)
+      for n <- 0 until N ;
+  data y[n] ~ MvNormal(mu[z[n]], cov[z[n]])
+      for n <- 0 until N ;
+}

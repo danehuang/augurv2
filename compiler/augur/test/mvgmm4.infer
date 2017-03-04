@@ -1,0 +1,1 @@
+MWG [mu] ~ MvNormal(mu[k], covs0) for k <- 0 until K (*) DiscGibbs [z]

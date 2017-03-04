@@ -1,0 +1,8 @@
+(K : Int, N : Int, mu0 : Vec Real, covs0 : Mat Real, pis : Vec Real, covs : Mat Real) => {
+  param mu[k] ~ MvNormal(mu0, covs0)
+      for k <- 0 until K ;
+  param z[n] ~ Categorical(pis)
+      for n <- 0 until N ;
+  data y[n] ~ MvNormal(mu[z[n]], covs)
+      for n <- 0 until N ;
+}

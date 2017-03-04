@@ -1,0 +1,10 @@
+(K : Int, D : Int, N : Vec Int, alpha : Vec Real, beta : Vec Real) => {
+  param theta[d] ~ Dirichlet(alpha)
+      for k <- 0 until D ;
+  param phi[k] ~ Dirichlet(beta)
+      for k <- 0 until K ;
+  param z[d, n] ~ Categorical(theta[d])
+      for d <- 0 until D, n <- 0 until N[d] ;
+  data w[d, n] ~ Categorical(phi[z[d, n]])
+      for d <- 0 until D, n <- 0 until N[d] ;
+}

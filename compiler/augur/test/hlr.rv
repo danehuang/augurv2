@@ -1,0 +1,8 @@
+(K : Int, N : Int, lam : Real, x : Vec (Vec Real)) => {
+  param v ~ Exponential(lam) ;
+  param b ~ Normal(0.0, v) ;
+  param theta[k] ~ Normal(0.0, v)
+      for k <- 0 until K ;
+  data y[n] ~ Bernoulli( sigmoid(dotprod(theta, x[n]) + b) )
+      for n <- 0 until N ;
+}
