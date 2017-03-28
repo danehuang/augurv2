@@ -134,6 +134,15 @@ void hi_augur_vec_host_alloc_data(AugurVec_t* vec, AugurTyp_t ty, uint_t elems, 
   }
 }
 
+AugurVec_t h_augur_idx_setup(AugurMemLoc_t loc, uint_t elems) {
+  AugurVec_t vec;
+  vec.ty = AUGUR_INT;
+  vec.elems = elems;
+  vec.stride = 0;
+  vec.data = augur_malloc(sizeof(int) * elems, loc);
+  return vec;
+}
+
 void h_augur_vec_host_base_alloc(AugurVec_t* vec, void* data, AugurTyp_t ty, uint_t elems) {
   h_augur_vec_host_alloc(vec, ty, elems, AUGUR_DATA);
   uint_t numbytes = ty2size(ty) * elems;
@@ -301,16 +310,10 @@ void  h_augur_flat_vec_cpy_data(AugurMemLoc_t loc, AugurFlatVec_t* dst, AugurFla
   }
 }
 
-/*
-void h_augur_vec_cpy_data(AugurVec_t* dst, void* src, AugurMemDir_t dir) {
-  uint_t numbytes = ty2size(dst->ty) * dst->elems;
-  augur_memcpy(dst->data, src, numbytes, dir);
-}
-*/
 
 /* Views */
 
-AugurVec_t augur_vec_view_as(AugurVec_t* src, AugurVec_t* shp) {
+__HOSTDEV__ AugurVec_t augur_vec_view_as(AugurVec_t* src, AugurVec_t* shp) {
   AugurVec_t view;
 
   view.ty = shp->ty;
@@ -321,11 +324,16 @@ AugurVec_t augur_vec_view_as(AugurVec_t* src, AugurVec_t* shp) {
   return view;
 }
 
-AugurVec_t augur_arr_view_as_vec(AugurTyp_t ty, void* data, uint_t elems) {
+__HOSTDEV__ AugurVec_t augur_vec_pll_view_as(AugurVec_t* src, AugurVec_t* shp, uint_t idx) {
+  AugurVec_t* tmp = AUGUR_VEC_GETV(src, idx);
+  return augur_vec_view_as(tmp, shp);
+}
+
+__HOSTDEV__ AugurVec_t augur_arr_view_as_vec(AugurTyp_t ty, void* data, uint_t elems) {
   AugurVec_t view;
 
   view.ty = ty;
-  view.stride = 0; // TODO
+  view.stride = 0; // TODO ??
   view.elems = elems;
   view.data = data;
 
@@ -346,13 +354,13 @@ void hi_augur_vec_dump(int tab, AugurMemLoc_t loc, AugurVec_t* vec) {
   case AUGUR_INT: {
     augur_tab(tab);
     printf("base[len=%d,ty=%s]: ", vec->elems, ty2str(vec->ty));
-    augur_arr_dumpi(vec->data, vec->elems, loc);
+    augur_arr_dumpi((int*) vec->data, vec->elems, loc);
     break;
   }
   case AUGUR_DBL: {
     augur_tab(tab);
     printf("base[len=%d,ty=%s]: ", vec->elems, ty2str(vec->ty));
-    augur_arr_dumpd(vec->data, vec->elems, loc);
+    augur_arr_dumpd((double*) vec->data, vec->elems, loc);
     break;
   }
   case AUGUR_VEC: {
@@ -369,10 +377,10 @@ void hi_augur_vec_dump(int tab, AugurMemLoc_t loc, AugurVec_t* vec) {
     case AUGUR_GPU: {
       for (uint_t i = 0; i < vec->elems; i++) {
 	AugurVec_t tmp;
-	augur_memcpy(&tmp, AUGUR_VEC_GETV(vec, i), AUGUR_D2H);
+	augur_memcpy(&tmp, AUGUR_VEC_GETV(vec, i), sizeof(AugurVec_t), AUGUR_D2H);
 	augur_tab(tab);
 	printf("vec[idx=%d]\n", i);
-	hi_augur_vec_dump(tab+2, &tmp, loc);
+	hi_augur_vec_dump(tab+2, loc, &tmp);
       }
       break;
     }
@@ -394,7 +402,7 @@ void hi_augur_vec_dump(int tab, AugurMemLoc_t loc, AugurVec_t* vec) {
     case AUGUR_GPU: {
       for (uint_t i = 0; i < vec->elems; i++) {
 	AugurMat_t tmp;
-	augur_memcpy(&tmp, AUGUR_VEC_GETM(vec, i), AUGUR_D2H);
+	augur_memcpy(&tmp, AUGUR_VEC_GETM(vec, i), sizeof(AugurMat_t), AUGUR_D2H);
 	augur_tab(tab);
 	printf("mat[idx=%d]\n", i);
 	hi_augur_mat_dump(tab+2, loc, &tmp);
@@ -417,11 +425,11 @@ void h_augur_flat_vec_dump(AugurMemLoc_t loc, AugurFlatVec_t* fvec) {
   printf("base typ: %s, base elems: %d\n", ty2str(fvec->base_ty), fvec->base_elems);
   switch (fvec->base_ty) {
   case AUGUR_INT: {
-    augur_arr_dumpi(fvec->base_data, fvec->base_elems, loc);
+    augur_arr_dumpi((int*) fvec->base_data, fvec->base_elems, loc);
     break;
   }
   case AUGUR_DBL: {
-    augur_arr_dumpd(fvec->base_data, fvec->base_elems, loc);
+    augur_arr_dumpd((double*) fvec->base_data, fvec->base_elems, loc);
     break;
   }
   default: {
@@ -714,18 +722,27 @@ void h_augur_vec_plus(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2) {
   }
 }
 
+#ifndef AUGURCPU
+__global__ void kernel_augur_flat_vec_plus(double* dst_data, double* fv1_data, double* fv2_data, int len) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < len) {
+    dst_data[idx] = fv1_data[idx] + fv2_data[idx];
+  }
+}
+#endif
+
 void h_augur_flat_vec_plus(AugurFlatVec_t* dst, AugurFlatVec_t* fv1, AugurFlatVec_t* fv2) {
   switch (dst->base_ty) {
   case AUGUR_DBL: {
-#ifdef AUGURCPU
     double* dst_data = (double*) dst->base_data;
     double* fv1_data = (double*) fv1->base_data;
     double* fv2_data = (double*) fv2->base_data;
+#ifdef AUGURCPU
     for (uint_t i = 0; i < dst->base_elems; i++) {
       dst_data[i] = fv1_data[i] + fv2_data[i];
     }
 #else
-    // TODO: IMPLEMENT ME
+    kernel_augur_flat_vec_plus<<<BLKS(dst->base_elems), THRDS>>>(dst_data, fv1_data, fv2_data, dst->base_elems);
 #endif
     break;
   }
@@ -834,7 +851,7 @@ void hi_augur_vec_to_native(AugurMemLoc_t loc, AugurVec_t* dst, char** dst_data,
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      AugurVec_t* d_vecs = augur_malloc(numbytes, AUGUR_GPU);
+      AugurVec_t* d_vecs = (AugurVec_t*) augur_malloc(numbytes, AUGUR_GPU);
       augur_memcpy(d_vecs, h_vecs, numbytes, AUGUR_H2D);
       dst->data = d_vecs;
       augur_free(h_vecs, AUGUR_CPU);      
@@ -860,8 +877,8 @@ void hi_augur_vec_to_native(AugurMemLoc_t loc, AugurVec_t* dst, char** dst_data,
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      AugurMat_t* d_mats = augur_malloc(numbytes, AUGUR_GPU);
-      augur_memcpy(d_mats, h_vecs, numbytes, AUGUR_H2D);
+      AugurMat_t* d_mats = (AugurMat_t*) augur_malloc(numbytes, AUGUR_GPU);
+      augur_memcpy(d_mats, h_mats, numbytes, AUGUR_H2D);
       dst->data = d_mats;
       augur_free(h_mats, AUGUR_CPU);
       break;
@@ -910,7 +927,9 @@ void hi_augur_vec_from_native(AugurMemLoc_t loc, AugurVec_t* dst, char** src_dat
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      augur_memcpy(dst->data, *src_data, numbytes, AUGUR_H2D);
+      // Assume src_data is on host
+      augur_memcpy(dst->data, *src_data, numbytes, AUGUR_H2H);
+      h_augur_vec_dump(AUGUR_CPU, dst);
       break;
     }
 #endif
@@ -940,99 +959,22 @@ void hi_augur_vec_from_native(AugurMemLoc_t loc, AugurVec_t* dst, char** src_dat
  * src_data: at loc
  */
 void h_augur_vec_from_native(AugurMemLoc_t loc, AugurVec_t* dst, AugurFlatVec_t* src) {
-  // h_augur_flat_vec_dump(AUGUR_CPU, src);
-  // h_augur_vec_dump(AUGUR_CPU, &(src->vec));
-  char* cpy = (char*) src->base_data;
-  hi_augur_vec_from_native(loc, dst, &cpy);
-}
-
-
-
-
- /*
-AugurVec_t h_augur_vec_stk_alloc(AugurMemLoc_t loc, AugurTyp_t ty, uint_t elems) {
-  AugurVec_t vec;
-  vec.ty = ty;
-  vec.stride = 0; // TODO??
-  vec.elems = elems;
-  vec.data = augur_malloc(ty2size(ty) * elems, loc);
-  return vec;
-}
-
-AugurVec_t h_augur_vec_stk_alloc2(AugurMemLoc_t loc, AugurTyp_t ty, uint_t elems, void* h_data) {
-  AugurVec_t vec = h_augur_vec_stk_alloc(loc, ty, elems);
-  uint_t numbytes = ty2size(ty) * elems;
   switch (loc) {
   case AUGUR_CPU: {
-    augur_memcpy(vec.data, h_data, numbytes, AUGUR_H2H);
+    char* src_data = (char*) src->base_data;
+    hi_augur_vec_from_native(loc, dst, &src_data);
     break;
   }
 #ifndef AUGURCPU
   case AUGUR_GPU: {
-    augur_memcpy(vec.data, h_data, numbytes, AUGUR_H2D);
+    uint_t numbytes = ty2size(src->base_ty) * src->base_elems;
+    char* src_data = (char*) augur_malloc(numbytes, AUGUR_CPU);
+    augur_memcpy(src_data, src->base_data, numbytes, AUGUR_D2H);
+    char* cpy = src_data;
+    hi_augur_vec_from_native(loc, dst, &src_data);
+    free(cpy);
     break;
   }
 #endif
-  }
-  return vec;
-}
-
-void h_augur_vec_stk_free(AugurMemLoc_t loc, AugurVec_t* vec) {
-  switch (vec->ty) {
-  case AUGUR_INT:
-  case AUGUR_DBL: {
-    if (!vec->data) {
-      augur_free(vec->data, loc);
-    }
-    break;
-  }
-  case AUGUR_VEC: {
-    switch (loc) {
-    case AUGUR_CPU: {
-      for (uint_t i = 0; i < vec->elems; i++) {
-	h_augur_vec_stk_free(loc, AUGUR_VEC_GETV(vec, i));
-      }
-      augur_free(vec->data, loc);
-      break;
-    }
-#ifndef AUGURCPU
-    case AUGUR_GPU: {
-      for (uint_t i = 0; i < vec->elems; i++) {
-	AugurVec_t tmp;
-	augur_memcpy(&tmp, AUGUR_VEC_GETV(vec, i), sizeof(AugurVec_t), AUGUR_D2H);
-	h_augur_vec_stk_free(&tmp, loc);
-      }
-      augur_free(vec->data, loc);
-      break;
-    }
-#endif
-    }
-    break;
-  }
-  case AUGUR_MAT: {
-    switch (loc) {
-    case AUGUR_CPU: {
-      for (uint_t i = 0; i < vec->elems; i++) {
-	// TODO: Should this be a matrix operation? or not to avoid circular ...
-	augur_free(AUGUR_VEC_GETM(vec, i)->data, loc);
-      }
-      augur_free(vec->data, loc);
-      break;
-    }
-#ifndef AUGURCPU
-    case AUGUR_GPU: {
-      for (uint_t i = 0; i < vec->elems; i++) {
-	AugurMat_t mat;
-	augur_memcpy(&mat, AUGUR_VEC_GETM(vec, i), sizeof(AugurMat_t), AUGUR_D2H);
-	augur_free(mat->data, loc);
-      }
-      augur_free(vec->data, loc);
-      break;
-    }
-#endif
-    }
-    break;
-  }
   }
 }
-*/

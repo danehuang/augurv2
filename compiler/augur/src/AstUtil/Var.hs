@@ -75,6 +75,7 @@ data IdKind = ModParam ParamKind    -- ^ model parameter (what we are trying to 
                            -- ^ generated auxilliary inference variables)
             | Local        -- ^ local variable
             | Param        -- ^ function parameter
+            | GridIdx      -- ^ indexing parameters
               deriving (Show, Eq)
 
 data ParamKind = PK_Det
@@ -91,6 +92,7 @@ class Sanitizable a where
 
 class (Ord b, Pretty b, Sanitizable b) => BasicVar b where
     idKind :: b -> IdKind
+    setIdKind :: b -> IdKind -> b
     varName :: b -> Name
     mkIdIO :: GenSym -> Name -> IdKind -> IO b
     
@@ -200,6 +202,7 @@ instance Sanitizable (TVar t) where
                                           
 instance BasicVar Var where
     idKind v = v_idKind v               
+    setIdKind v ik = v { v_idKind = ik }
     varName v = Name $ v_varName v                
     mkIdIO _ (Name s) ik = return $ Id s ik
     mkIdIO _ name _ =
@@ -207,6 +210,7 @@ instance BasicVar Var where
               
 instance BasicVar MVar where
     idKind v = m_idKind v
+    setIdKind v ik = v { m_idKind = ik }
     varName v = m_varName v
     mkIdIO genSym n ik =
         do sym <- freshSym genSym           
@@ -215,6 +219,7 @@ instance BasicVar MVar where
                   
 instance BasicVar (TVar t) where
     idKind v = t_idKind v
+    setIdKind v ik = v { t_idKind = ik }
     varName v = t_varName v    
     mkIdIO genSym n ik =
         do sym <- freshSym genSym
@@ -236,6 +241,7 @@ instance Pretty IdKind where
     ppr ModAux = text "Aux"
     ppr Local = text "Local"
     ppr Param = text "FnParam"
+    ppr GridIdx = text "GridIdx"
 
 instance Pretty ParamKind where
     ppr PK_Det = text "Det"
@@ -269,6 +275,7 @@ instance Pretty (TVar t) where
                 _ -> ppr name
           Local -> text "t" <> int uid
           Param -> ppr name
+          GridIdx -> text "t" <> int uid
 
 
 -----------------------------------
@@ -312,6 +319,10 @@ isModHyper _ = False
 isModLocal :: IdKind -> Bool
 isModLocal Local = True
 isModLocal _ = False
+
+isGridIdx :: IdKind -> Bool
+isGridIdx GridIdx = True
+isGridIdx _ = False
 
 isModDecl :: IdKind -> Bool
 isModDecl (ModParam _) = True

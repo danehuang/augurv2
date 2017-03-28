@@ -76,29 +76,35 @@ data ESliceRdr b =
     ER { er_like :: Name
        , er_propVarsM :: Map.Map b b
        , er_vWorkCov :: b
-       , er_vWorkNu :: b}
+       , er_vWorkNu :: b }
 
     
 -----------------------------------
 -- == Transformation
 
+getDensPtPropVar :: (TypedVar b Typ) => Exp b -> ESliceM b b
+getDensPtPropVar pt = 
+    do propVarsM <- asks er_propVarsM
+       case Map.lookup (densPtVar pt) propVarsM of
+         Just v -> return v
+         Nothing -> error $ "[Core.CgESlice] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM
+
+
 esliceBody :: (TypedVar b Typ) => Fn b -> ESliceM b (L.Stmt b)
-esliceBody (Dens dist pt es) =
-    do -- call eslice
-       like <- asks er_like
-       propVarsM <- asks er_propVarsM
+esliceBody (Dens _ pt es) =
+    do like <- asks er_like
        v_workCov <- asks er_vWorkCov
        v_workNu <- asks er_vWorkNu
-       let pt' = case Map.lookup (densPtVar pt) propVarsM of
-                   Just v -> mkDensPt v (densPtIdx' pt)
-                   Nothing -> error $ "[CgESlice] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM
-           args = [ cgExp pt, cgExp pt' ] ++ map cgExp es ++ [ L.Var v_workCov, L.Var v_workNu ] ++ map cgExp (densPtIdx' pt)
+       v_mod <- getDensPtPropVar pt
+       let pt' = mkDensPt v_mod (densPtIdx' pt)
+           args = [ cgExp pt, cgExp pt' ] ++ map cgExp es ++ 
+                  [ L.Var v_workCov, L.Var v_workNu ] ++ map cgExp (densPtIdx' pt)
        return $ L.Exp (L.Call (L.PrimId DM_Fn PM_Fn (EllipSlice like)) args)
-esliceBody (Ind _ _) = error $ "[CgESlice] | Shouldn't happen"
+esliceBody (Ind _ _) = error $ "[Core.CgESlice] | Shouldn't happen"
 esliceBody (Let x e fn) =
     do s <- esliceBody fn
        return $ L.Seq (L.Assign x (cgExp e)) s
-esliceBody (Prod _ _) = error $ "[CgESlice] | Shouldn't happen"
+esliceBody (Prod _ _) = error $ "[Core.CgESlice] | Shouldn't happen"
 esliceBody (Pi x gen fn) =
     do let gen' = cgGen gen
        s <- esliceBody fn
@@ -121,7 +127,7 @@ esliceFn v_mod fn =
 
 runESliceFn :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> b -> Fn b -> CompM (K.Kern (LX.LowPP b) b)
 runESliceFn cinfo copt inferCtx v_mod fn =
-    do likeOne <- runLLFnOne cinfo copt inferCtx v_mod fn
+    do (projIdx, likeOne) <- runLLFnOne cinfo copt inferCtx v_mod fn
        let (hdFn, _) = RW.split v_mod fn
        v_workCov <- lift $ mkTyIdIO (getGenSym cinfo) Anon ModAux (MatTy RealTy)
        v_workNu <- lift $ mkTyIdIO (getGenSym cinfo) Anon ModAux (VecTy RealTy)
@@ -129,10 +135,10 @@ runESliceFn cinfo copt inferCtx v_mod fn =
            se = S.MaxDim (densPtVar pt) (length (densPtIdx pt))
            shpCtx = Map.fromList [ (v_workCov, S.MatConn se se S.Scalar)
                                  , (v_workNu, S.SingConn se S.Scalar) ]
-       prop <- runReaderT (esliceFn v_mod hdFn) (ER (L.declName likeOne) (ic_dupCtx inferCtx) v_workCov v_workNu)
-       let likeOne' = LX.LowPP (LX.LowXX Map.empty False likeOne)
-           prop' = LX.LowPP (LX.LowXX shpCtx True prop)
-           kind = K.Slice (K.Ellip likeOne' prop')
-           like' = LX.LowPP (LX.LowXX Map.empty False likeOne) -- TODO: HACK but never used?
+       eslice <- runReaderT (esliceFn v_mod hdFn) (ER (L.declName likeOne) (ic_dupCtx inferCtx) v_workCov v_workNu)
+       let likeOne' = LX.LowPP (LX.LowXX Map.empty False (LX.DevCall True) projIdx likeOne)
+           eslice' = LX.LowPP (LX.LowXX shpCtx True (LX.HostCall False) [] eslice)
+           kind = K.Slice (K.Ellip likeOne' eslice')
+           like' = error $ "[Core.CgESlice] @runESliceFn | Shouldn't deref"
            kern = K.Base kind (K.Single v_mod) fn [] [] like' 
        return kern

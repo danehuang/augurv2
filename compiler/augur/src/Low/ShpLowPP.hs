@@ -158,6 +158,8 @@ runShpiDecl inferCtx shpCtx decl =
            dupCtx = ic_dupCtx inferCtx
            modDeclsShp = Map.fromList (map (\(_, x, _) -> (x, Shp.mkCpy x)) modDecls)
            dupCtxShp = Map.fromList (map (\v -> (fromJust (Map.lookup v dupCtx), Shp.mkCpy v)) (getModParamIds modDecls))
-       (_, shpCtx') <- runStateT (shpiDecl decl) (modDeclsShp `Map.union` dupCtxShp `Map.union` shpCtx)
+           idxCtx = Map.singleton (getIdxVar inferCtx) (Shp.SingConn (Shp.Val (Shp.Int 10)) Shp.Scalar)
+           ctx = modDeclsShp `Map.union` dupCtxShp `Map.union` shpCtx `Map.union` idxCtx
+       (_, shpCtx') <- runStateT (shpiDecl decl) ctx
        let allocs = Set.fromList (declAllocs decl)
        return $ Map.filterWithKey (\k _ -> k `Set.member` allocs) shpCtx'

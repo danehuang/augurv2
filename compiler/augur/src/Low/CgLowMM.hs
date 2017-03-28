@@ -56,9 +56,9 @@ type CgM = CompM
 
 cgLowMM :: CompInfo -> CompOpt -> InferCtx TyId -> LX.LowPP TyId -> CgM (LX.LowMM TyId)
 cgLowMM cinfo copt inferCtx lowppDecl =
-    do LX.LowMM (LX.LowXX shpCtx' useAux' decl') <- runLowerDecl cinfo copt inferCtx lowppDecl       
+    do LX.LowMM (LX.LowXX shpCtx' useAux' cc' projIdx' decl') <- runLowerDecl cinfo copt inferCtx lowppDecl       
        decl'' <- runProjDecl cinfo copt inferCtx decl'
-       return $ LX.LowMM (LX.LowXX shpCtx' useAux' decl'')
+       return $ LX.LowMM (LX.LowXX shpCtx' useAux' cc' projIdx' decl'')
 
 
               

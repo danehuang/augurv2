@@ -44,6 +44,11 @@ compErr msg = compErrMod "CgCudaCCore" msg
 -----------------------------------
 -- == Types and operations
 
+atmExpVar :: Exp (TVar Typ) -> TVar Typ
+atmExpVar (Var x) = x
+atmExpVar e = error $ "Found ill-typed AST: " ++ show e
+
+              
 tyOf :: Exp (TVar Typ) -> Typ
 tyOf (Var x) = getType' x
 tyOf (Lit lit) =
@@ -94,7 +99,12 @@ cgIdRhs x
     where
       x' = x { t_ty = Just $ cgTyp (idKind x) (getType' x) }
 
-                  
+
+cgLit :: Lit -> C.Exp (TVar C.Typ)
+cgLit (Int i) = C.mkInt i
+cgLit (Real d) = C.Lit (C.Dbl d)
+
+                 
 cgPrim :: Prim -> PrimMode -> [C.Exp (TVar C.Typ)] -> C.Exp (TVar C.Typ)
 cgPrim prim pm es =
     case prim of
@@ -124,9 +134,20 @@ AugurMat_t* p_3 = &(v_strct.p_3);       (v_strct.p_3 : AugurMat_t)
 projTopLvl :: Typ -> C.Exp (TVar C.Typ) -> C.Exp (TVar C.Typ)
 projTopLvl ty e =
     case ty of
-      VecTy _ -> C.addrOf (C.strctProj' e "vec")
-      MatTy _ -> C.addrOf e
-      BlkTy _ -> C.addrOf e
+      VecTy _ -> C.Cast (C.PtrTy ty_AugurVec) (C.addrOf (C.strctProj' e "vec"))
+      MatTy _ -> C.Cast (C.PtrTy ty_AugurMat) (C.addrOf e)
+      BlkTy _ -> C.Cast (C.PtrTy ty_AugurBlk) (C.addrOf e)
+      _ -> e
+
+
+projTopLvl' :: C.Typ -> C.Exp (TVar C.Typ) -> C.Exp (TVar C.Typ)
+projTopLvl' ty e =
+    case ty of
+      C.VecTy _ -> C.Cast (C.PtrTy ty_AugurVec) (C.addrOf (C.strctProj' e "vec"))
+      C.NameTy "AugurVec_t" -> C.Cast (C.PtrTy ty_AugurVec) (C.addrOf (C.strctProj' e "vec"))
+      C.MatTy _ -> C.Cast (C.PtrTy ty_AugurMat) (C.addrOf e)
+      C.NameTy "AugurMat_t" -> C.Cast (C.PtrTy ty_AugurMat) (C.addrOf e)
+      C.NameTy "AugurBlk_t" -> C.Cast (C.PtrTy ty_AugurBlk) (C.addrOf e)
       _ -> e
 
 
@@ -145,6 +166,20 @@ unpackStrct useCtx vStrct fields =
                 Nothing -> C.mkSkip
               
 
+unpackStrct' :: Map.Map (TVar C.Typ) Int -> TVar C.Typ -> [TVar Typ] -> C.Stmt (TVar C.Typ)
+unpackStrct' useCtx vStrct fields =
+    C.seqStmt (map f fields)
+    where
+      f x = let x' = cgIdLhs x
+                ty = getType' x
+            in
+              case Map.lookup (cgIdLhs x) useCtx of
+                Just cnt ->
+                    if cnt > 0
+                    then C.assignStmt x' (projTopLvl ty (C.strctProj vStrct x'))
+                    else C.mkSkip
+                Nothing -> C.mkSkip
+
                  
 unpackPropStrct :: TVar C.Typ -> ModParamDupCtx (TVar Typ) -> C.Stmt (TVar C.Typ)
 unpackPropStrct vStrct fields =
@@ -155,3 +190,43 @@ unpackPropStrct vStrct fields =
                      ty = getType' v
                  in
                    C.assignStmt v' (projTopLvl ty (C.strctProj vStrct k'))
+
+                    
+cgProj :: Typ -> C.Exp (TVar C.Typ) -> [C.Exp (TVar C.Typ)] -> C.Exp (TVar C.Typ)
+cgProj ty e es =
+    C.LibCall (getProjLibFn ty (length es)) (e:es)
+
+     
+{-| [Note]
+
+Expects simpl projections, i.e., at most 1 indexing.
+
+>> x :: <Local, RealTy>[] :+= erhs
+<< x += erhs
+
+>> x :: <ModParam, RealTy>[] :+= erhs
+<< AUGUR_SETD(x, erhs)
+
+>> x :: <Local, Vec RealTy>[e] := erhs
+<< AUGUR_VEC_SETD(x, e, erhs)
+
+>> x[e_1,..,e_n] := erhs
+
+elhs_1 = AUGUR_VEC_GETV(x, e_1)
+...
+elhs_{n-1} = AUGUR_VEC_GETV(x, e_{n-1})
+AUGUR_VEC_SETI(elhs_{n-1}, e_n, erhs)
+
+-}
+cgStore :: TVar Typ -> [C.Exp (TVar C.Typ)] -> UpKind -> C.Exp (TVar C.Typ) -> C.Exp (TVar C.Typ)
+cgStore x es uk erhs =
+    case getStoreLibFn (idKind x) uk (getType' x) (projBaseTy (getType' x) es) of
+      Left lib ->          
+          let es_args = if prmtStoreDst (idKind x) uk (getType' x)
+                        then [ C.addrOf e_dst ] ++ es ++ [ erhs ]
+                        else [ e_dst ] ++ es ++ [ erhs ]
+          in
+            C.LibCall lib es_args
+      Right aop -> C.Assign e_dst aop erhs
+    where
+      e_dst = C.Var (cgIdLhs x)

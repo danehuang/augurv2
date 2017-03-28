@@ -203,3 +203,4 @@ isBlk :: Shp b -> Bool
 isBlk (BlkOf _) = True
 isBlk _ = False
                     
+

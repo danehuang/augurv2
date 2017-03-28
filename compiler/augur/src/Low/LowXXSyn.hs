@@ -37,6 +37,8 @@ information.
 
 data LowXX b = LowXX { getGlobs :: S.ShpCtx b  -- ^ Global variables
                      , useMcmcPropSt :: Bool   -- ^ Uses MCMC proposal state?
+                     , getCC :: CallConv       -- ^ Where we call this decl from
+                     , projIdx :: [b]          -- ^ Project indices
                      , getDecl :: L.Decl b     -- ^ The declaration
                      }
 
@@ -44,21 +46,35 @@ newtype LowPP b = LowPP { unLowPP :: LowXX b }
 
 newtype LowMM b = LowMM { unLowMM :: LowXX b }
 
+data CallConv = HostCall { isHostCode :: Bool }
+              | DevCall { getDynPar :: Bool }
+                deriving (Show)
 
+    
 -----------------------------------
 -- == Instances
 
-    
+
 instance (Pretty b) => Pretty (LowPP b) where
-    ppr (LowPP (LowXX shpCtx useProp decl)) =
-        vcat [ text "globals" <+> ppr shpCtx, f useProp, ppr decl ]
+    ppr (LowPP (LowXX shpCtx useProp cc projIdx decl)) =
+        vcat [ text "globals" <+> ppr shpCtx
+             , f useProp
+             , text "cc" <+> text "=" <+> ppr cc
+             , ppr decl ]
         where
           f False = text "prop = False"
           f True = text "prop = True"
                   
 instance (Pretty b) => Pretty (LowMM b) where
-    ppr (LowMM (LowXX shpCtx useProp decl)) =
-        vcat [ text "globals" <+> ppr shpCtx, f useProp, ppr decl ]
+    ppr (LowMM (LowXX shpCtx useProp cc projIdx decl)) =
+        vcat [ text "globals" <+> ppr shpCtx
+             , f useProp
+             , text "cc" <+> text "=" <+> ppr cc
+             , ppr decl ]
         where
           f False = text "prop = False"
           f True = text "prop = True"
+
+instance Pretty CallConv where
+    ppr (HostCall hostCode) = if hostCode then text "hostCode" else text "hostCall"
+    ppr (DevCall dynPar) = if dynPar then text "devDyn" else text "dev"

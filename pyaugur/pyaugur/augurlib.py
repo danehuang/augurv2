@@ -192,7 +192,7 @@ class AugurInfer:
         logmsg('LL: ' + str(ll))
         return modParam2Dict(modParams)
 
-    def samplen(self, burnIn=0, numSamples=1, thin=1):
+    def samplen(self, burnIn=0, numSamples=1, thin=1, log_like=False):
         assert self.inferLib is not None
 
         # Burn in
@@ -206,13 +206,14 @@ class AugurInfer:
 
         for i in range(0, numSamples * thin):
             self._call_augur_step()
-            #print 'log-like: ', self.curr_ll()
             
             # Copy sample back
             if i % thin == 0:
                 if i % 100 == 0:
                     logmsg('Doing iter: ' + str(i) + ' / ' + str(numSamples))
                 ll, modParams = self._call_augur_cpy()
+                if log_like:
+                    print('log-like[%d]: %f' % (i / thin, self.curr_ll()))
 
                 modParamsDict = modParam2Dict(modParams)
                 for name in self.param_names:
@@ -263,10 +264,11 @@ class AugurInfer:
         # Load augur compiler as dynamic library
         logmsg('Loading Augur compiler...')
         if self.os == 'osx':
-            lib_hs_augur_compiler = cdll.LoadLibrary(op.join(self.libaugurdir, 'libHSaugur-0.1.0.0-ghc7.8.4.dylib'))
+            #lib_hs_augur_compiler = cdll.LoadLibrary(op.join(self.libaugurdir, 'libHSaugur-0.1.0.0-ghc7.8.4.dylib'))
+            lib_hs_augur_compiler = cdll.LoadLibrary(op.join(self.libaugurdir, 'libHSaugur-0.1.0.0-BRXl6V4Cbnj3aW4oo2NE22-ghc8.0.2.dylib'))
             logmsg('Successfully loaded ' + repr(lib_hs_augur_compiler) + ' as osx dynamic library')
         elif self.os == 'linux':
-            lib_hs_augur_compiler = cdll.LoadLibrary(op.join(self.libaugurdir, 'libHSaugur-0.1.0.0-ghc7.8.4.so'))
+            lib_hs_augur_compiler = cdll.LoadLibrary(op.join(self.libaugurdir, 'libHSaugur-0.1.0.0-BRXl6V4Cbnj3aW4oo2NE22-ghc8.0.2.so'))
             logmsg('Successfully loaded ' + repr(lib_hs_augur_compiler) + ' as linux dynamic library')
         
         # [ model, target, infer, mode, sizes ] -> String
@@ -342,7 +344,53 @@ class AugurInfer:
         lib_path = [ '-L' + self.augurdir ] + map(lambda x: '-L' + x, self.libdir)
         path_flags =  inc_path + lib_path
 
-        if self.aopt.target == 'gpu':
+        if self.aopt.target == 'cpu':
+            # Compile and link inference code
+            comp_flags = [ '-O3', '-shared', '-fPIC', '-DAUGURCPU', '-o', self.LIBAUGUR_IFACE, f_infer ]
+            extra_flags = [ '-lgsl', '-Wl,-rpath,' + self.augurdir, '-laugur_util_cpu' ]
+            cmd = [ 'clang' ] + path_flags + comp_flags + extra_flags
+            logmsg(' '.join(cmd))
+            exit_code = subp.check_call(cmd)
+            logmsg('Done with exit code: ' + repr(exit_code))
+
+            # osx specific dynamic library path update
+            if self.os == 'osx':
+                cmd = [ 'install_name_tool', '-change', 'libaugur_util_cpu.dylib', '@rpath/libaugur_util_cpu.dylib', self.LIBAUGUR_IFACE ]
+                exit_code = subp.check_call(cmd)
+                logmsg('Done with library shenanigans: ' + repr(exit_code))
+
+        elif self.aopt.target == 'gpu':
+            lib_path = [ '-L' + op.join(self.augurdir, 'gpu') ] + map(lambda x: '-L' + x, self.libdir)
+            path_flags = inc_path + lib_path
+
+            AUGUR_IFACE_OBJ = op.join(self.workdir, 'augur_iface.o')
+            LIBAUGUR_IFACE_OBJ = op.join(self.workdir, 'libaugur_iface.o')
+            augur_lib = [ 'augur_blkop.o', 'augur_dist.o', 'augur_math.o', 'augur_matop.o', 'augur_rtmem.o', 'augur_util.o', 'augur_rtval.o', 'augur_vecop.o' ]
+            augur_lib_p = map(lambda obj_file: op.join(self.augurdir, 'gpu', obj_file), augur_lib)
+            logmsg('augur_gpu: ' + str(augur_lib_p))
+
+            # Compile inference code to object code
+            comp_flags = [ '-arch=sm_35', '-O3', '-Xcompiler', '-fPIC', '-dc', '-o', AUGUR_IFACE_OBJ, f_infer ]
+            cmd = [ 'nvcc' ] + path_flags + comp_flags
+            logmsg(' '.join(cmd))
+            exit_code = subp.check_call(cmd)
+            logmsg('Done with exit code: ' + repr(exit_code))
+
+            # Link augur lirbary object code
+            comp_flags = [ '-arch=sm_35', '-Xcompiler', '-fPIC', '-dlink', '-o', LIBAUGUR_IFACE_OBJ, AUGUR_IFACE_OBJ ] + augur_lib_p
+            cmd = [ 'nvcc' ] + path_flags + comp_flags
+            logmsg(' '.join(cmd))
+            exit_code = subp.check_call(cmd)
+            logmsg('Done with exit code: ' + repr(exit_code))
+
+            # Link and create shared library
+            comp_flags = [ '-arch=sm_35', '-Xcompiler', '-fPIC', '--shared', '-o', self.LIBAUGUR_IFACE, LIBAUGUR_IFACE_OBJ, AUGUR_IFACE_OBJ ] + augur_lib_p
+            cmd = [ 'nvcc' ] + path_flags + comp_flags + [ '-lgsl', '-lgslcblas', '-lm' ]
+            logmsg(' '.join(cmd))
+            exit_code = subp.check_call(cmd)
+            logmsg('Done with exit code: ' + repr(exit_code))
+
+            """
             AUGUR_IFACE_OBJ = op.join(self.tmpdir, 'augur_iface.o')
             LIBAUGUR_IFACE_OBJ = op.join(self.tmpdir, 'libaugur_iface.o')
 
@@ -366,20 +414,7 @@ class AugurInfer:
             logmsg(' '.join(cmd))
             exit_code = subp.check_call(cmd)
             logmsg('Done with exit code: ' + repr(exit_code))
-        elif self.aopt.target == 'cpu':
-            # Compile and link inference code
-            comp_flags = [ '-O3', '-shared', '-fPIC', '-DAUGURCPU', '-o', self.LIBAUGUR_IFACE, f_infer ]
-            extra_flags = [ '-lgsl', '-Wl,-rpath,' + self.augurdir, '-laugur_util_cpu' ]
-            cmd = [ 'clang' ] + path_flags + comp_flags + extra_flags
-            logmsg(' '.join(cmd))
-            exit_code = subp.check_call(cmd)
-            logmsg('Done with exit code: ' + repr(exit_code))
-
-            # osx specific dynamic library path update
-            if self.os == 'osx':
-                cmd = [ 'install_name_tool', '-change', 'libaugur_util_cpu.dylib', '@rpath/libaugur_util_cpu.dylib', self.LIBAUGUR_IFACE ]
-                exit_code = subp.check_call(cmd)
-                logmsg('Done with library shenanigans: ' + repr(exit_code))
+            """
 
         # Load inference code as shared library
         logmsg('Transferring data to native inference library...')

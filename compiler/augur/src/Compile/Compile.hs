@@ -37,7 +37,8 @@ import Core.KernSyn
 import qualified Low.LowShpSyn as S
 import qualified Low.LowXXSyn as LX
 import Core.CoreTySyn
-import CudaC.CodeGenC
+-- import qualified CudaC.CodeGenC as CCg
+import qualified CudaC.CgCuda as CuCg
 import CudaC.CgStInit
 import qualified CudaC.CudaCSyn as C
 import Compile.CompData
@@ -219,7 +220,7 @@ cgMidend' cinfo copt inferCtx k =
                    (v_currBlk, v_propBlk) <- mkBlkId cinfo v_wrt
                    kern <- lift $ runHmcFn cinfo copt inferCtx v_wrt v_currBlk v_propBlk simLen stepSize fn
                    return kern
-            Slice (Ellip _ _) ->                
+            Slice (Ellip _ _) -> 
                 do let v_mod = head (kuVars ku)
                    kern <- lift $ runESliceFn cinfo copt inferCtx v_mod fn
                    return kern
@@ -238,25 +239,26 @@ cgMidend' cinfo copt inferCtx k =
                     
 midendFn :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> KernU (TVar Typ) -> CompM (Kern (LX.LowPP (TVar Typ)) (TVar Typ), InferCtx (TVar Typ))
 midendFn cinfo copt inferCtx k =
-    do -- debugM logCompileMidend ("Kern (Input):\n" ++ pprShow (KernU' k))
-       k' <- runLintKernU cinfo (ic_modDecls inferCtx) k
-       -- debugM logCompileMidend ("Linted Kern: (Intermediate):\n" ++ pprShow k')
+    do k' <- runLintKernU cinfo (ic_modDecls inferCtx) k       
        (k'', inferCtx') <- runStateT (cgMidend' cinfo copt inferCtx k') inferCtx
-       -- debugM logCompileMidend ("Codegen Kern (Output):\n" ++ pprShow k'')
        return (k'', inferCtx')
 
-               
+              
 -----------------------------------
 -- == Backend
 
 backendDecl :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> LX.LowPP (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
 backendDecl cinfo copt inferCtx v_rng lowppDecl =
-    do -- debugM logCompileBackend ("LowPP (Input):\n" ++ pprShow lowppDecl)
-       lowmmDecl <- runCgLowMM cinfo copt inferCtx lowppDecl
-       -- debugM logCompileBackend ("LowMM (Intermediate):\n" ++ pprShow lowmmDecl)
-       cDecls <- runCgDecl cinfo inferCtx v_rng lowmmDecl
-       -- debugM logCompileBackend ("CudaC (Output):\n" ++ pprShow (C.Prog cDecls))
+    do lowmmDecl <- runCgLowMM cinfo copt inferCtx lowppDecl
+       {-
+       cDecls <- CCg.runCgDecl cinfo inferCtx v_rng lowmmDecl
        return (LX.getGlobs (LX.unLowMM lowmmDecl), cDecls)
+       -}
+       let rtSizes = Map.empty -- TODO: HACK
+       (shpCtx', cDecls) <- CuCg.runCgDecl cinfo copt inferCtx (getTarget copt) rtSizes v_rng lowmmDecl
+       return (shpCtx', cDecls)
+       
+       
               
               
 backendDecls :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> [LX.LowPP (TVar Typ)]  -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
@@ -285,43 +287,45 @@ cgDet cinfo copt inferCtx detFns =
        return $ Map.fromList detCtx
                         
 
--- CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> LX.LowPP (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
 cgLLMod :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Fn (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
 cgLLMod cinfo copt inferCtx v_rng fn =
     do llAll <- runLLFn cinfo copt inferCtx (mkName "ll_mod") fn
        llCall <- runCgCallLLMod
-       let foo = LX.LowPP (LX.LowXX Map.empty False llAll)
+       let foo = LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) [] llAll)
        (shpCtx, llAll') <- backendDecl cinfo copt inferCtx v_rng foo
        return (shpCtx, llAll' ++ [ llCall ])                   
+
               
-compile :: Rv.Model -> Maybe (KernU String) -> CompM (Py.Decl (TVar Typ), String, String, C.Prog (TVar C.Typ))
-compile model infer =
+compile :: Rv.Model -> Maybe (KernU String) -> Target -> CompM (Py.Decl (TVar Typ), String, String, C.Prog (TVar C.Typ))
+compile model infer target =
     do -- handle <- initCompLogger
        genSym <- lift $ newGenSym
        let cinfo = CompInfo genSym
-           copt = CompOpt True
+           copt = CompOpt True target
        (modDecls, dupCtx, fn, kern) <- frontend cinfo model infer
        let tlDepG = depTopLevel fn
        debugM "[Compile.Compile]" $ " | Top-level dependencies: " ++ pprShow tlDepG
        let pyTys = genPyTyp modDecls
            ord = getModDeclIds modDecls
-           fns = map (\fn' -> (densPtVar (gatherDensPt fn'), fn')) (RW.unfactorInOrd ord fn)                 
-           inferCtx = IC Map.empty dupCtx modDecls
+           fns = map (\fn' -> (densPtVar (gatherDensPt fn'), fn')) (RW.unfactorInOrd ord fn)
+       v_idxs <- lift $ mkTyIdIO (getGenSym cinfo) (mkName "idxs") ModAux (VecTy IntTy)
+       let inferCtx = IC Map.empty dupCtx modDecls v_idxs
        pyModParam <- runCgPyModParams cinfo modDecls fns -- HERE
        debugM "[Compile.Compile]" $ "Python model parameters: " ++ pprShow pyModParam
        kern' <- kernify modDecls fn kern
        (kern'', inferCtx') <- midendFn cinfo copt inferCtx kern'
        detCtx <- cgDet cinfo copt inferCtx (filter (\(_, fn') -> isDirac fn') fns)
        v_rng <- lift $ mkTyIdIO genSym (mkName "rng") ModAux (C.PtrTy (C.NameTy "augur_rng"))
+       -- v_idxs <- lift $ mkTyIdIO genSym (mkName "idxs") ModAux (C.VecTy C.IntTy)
        (shpCtx, cdecls) <- backendDecls cinfo copt inferCtx' v_rng (gatherCode kern'' ++ Map.elems detCtx)
        (shpCtx', llMod) <- cgLLMod cinfo copt inferCtx' v_rng fn 
-       let shpCtx'' = shpCtx `Map.union` shpCtx'
-       mcmcInit <- runCgStInit cinfo v_rng inferCtx' shpCtx'' kern''
+       let shpCtx'' = shpCtx `Map.union` shpCtx'                      
+       mcmcInit <- runCgStInit cinfo (getTarget copt) v_rng inferCtx' shpCtx'' kern''
                    
        chdr <- runCgHdr cinfo inferCtx' kern'' shpCtx'' v_rng
-       mcmcStep <- runCgMcmcDecl cinfo CPU tlDepG (mapCode (LX.getDecl . LX.unLowPP) kern'')
-       mcmcSetPt <- runCgStSetPt cinfo inferCtx'
-       mcmcCpy <- runCgStCpy cinfo inferCtx'
+       mcmcStep <- runCgMcmcDecl cinfo target tlDepG (mapCode (LX.getDecl . LX.unLowPP) kern'')
+       mcmcSetPt <- runCgStSetPt cinfo (getTarget copt) inferCtx'
+       mcmcCpy <- runCgStCpy cinfo (getTarget copt) inferCtx'
        
        -- closeCompLogger handle 
        return (pyModParam, pyTys, chdr, C.Prog (cdecls ++ llMod ++ [ mcmcStep, mcmcSetPt, mcmcCpy, mcmcInit ]))

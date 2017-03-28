@@ -75,7 +75,7 @@ cgGradProp cinfo v_wrt vs_adj v_currBlk v_propBlk v_simLen v_stepSize gradName l
            shpCtx = Map.fromList [ (v_grad, S.BlkOf vs_adj)
                                  , (v_mom0, S.BlkOf v_wrt)
                                  , (v_mom, S.BlkOf v_wrt) ]
-       return $ LX.LowPP (LX.LowXX shpCtx True decl)
+       return $ LX.LowPP (LX.LowXX shpCtx True (LX.HostCall True) [] decl)
 
               
               
@@ -89,8 +89,8 @@ runHmcFn cinfo copt inferCtx v_wrt v_currBlk v_propBlk simLen stepSize fn =
        v_simLen <- lift $ mkTyIdIO (getGenSym cinfo) Anon Local RealTy -- TODO: hacked idkind, shoudl come up with better one
        v_stepSize <- lift $ mkTyIdIO (getGenSym cinfo) Anon Local RealTy -- TODO: hacked idkind, shoudl come up with better one
        prop' <- cgGradProp cinfo v_wrt vs_adj v_currBlk v_propBlk v_simLen v_stepSize (L.declName grad) (L.declName like)       
-       let like' = LX.LowPP (LX.LowXX Map.empty False like)
-           grad' = LX.LowPP (LX.LowXX shpCtx False grad) -- TODO: move this to the gradient side
+       let like' = LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) [] like)
+           grad' = LX.LowPP (LX.LowXX shpCtx False (LX.HostCall False) [] grad) -- TODO: move this to the gradient side
            kind' = K.GradProp (K.HMC grad' prop' simLen stepSize)
            allocs = map (\v -> (v, K.Reset)) (L.declAllocs (LX.getDecl (LX.unLowPP prop')))
            kernParams = [ v_simLen, v_stepSize ]

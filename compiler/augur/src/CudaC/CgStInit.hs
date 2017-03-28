@@ -113,30 +113,48 @@ cgShpId x =
       MatTy _ -> C.addrOf (C.Var (cgId x))
       ty -> error $ "Shouldn't happen " ++ pprShow ty
 
-            
-cgShpExpLit :: S.ShpExp (TVar Typ) -> C.Lit (TVar C.Typ)
-cgShpExpLit (S.Cpy x) =
-    C.Strct [ ("kind", C.mkLiterally "DIM_CPY")
-            , ("cpyty", C.mkLiterally (ty2AugurTy (getType' x)))
-            , ("cpyof", cgShpId x) ]
-cgShpExpLit (S.Val e) =
-    C.Strct [ ("kind", C.mkLiterally "DIM_VAL")
-            , ("val", cgConstExp e) ]
-cgShpExpLit (S.MaxDim x axis) =
-    C.Strct [ ("kind", C.mkLiterally "DIM_MAX")
-            , ("objty", C.mkLiterally enum_AUGUR_VEC)
-            , ("obj", cgShpId x)
-            , ("dim", C.mkInt axis) ]
-
+        
+cgShpExpLit' :: TVar C.Typ -> S.ShpExp (TVar Typ) -> C.Stmt (TVar C.Typ)
+cgShpExpLit' v shp =
+    case shp of
+      S.Cpy x ->
+          let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_CPY") ]))
+              s2 = C.assignStmt' (e_strct "cpyty") (C.mkLiterally (ty2AugurTy (getType' x)))
+              s3 = C.assignStmt' (e_strct "cpyof") (cgShpId x)
+          in
+            C.seqStmt [ s1, s2, s3 ]
+      S.Val e ->
+          let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_VAL") ]))
+              s2 = C.assignStmt' (e_strct "val") (cgConstExp e)
+          in
+            C.seqStmt [ s1, s2 ]
+      S.MaxDim x axis ->
+          let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_MAX") ]))
+              s2 = C.assignStmt' (e_strct "objty") (C.mkLiterally enum_AUGUR_VEC)
+              s3 = C.assignStmt' (e_strct "obj") (cgShpId x)
+              s4 = C.assignStmt' (e_strct "dim") (C.mkInt axis)
+          in
+            C.seqStmt [ s1, s2, s3, s4 ]
+    where
+      e_strct = C.strctProj' (C.Var v)        
     
-cgShpLit :: S.Shp (TVar Typ) -> [C.Lit (TVar C.Typ)]
-cgShpLit S.Scalar = []
-cgShpLit (S.SingConn e shp') = cgShpExpLit e : cgShpLit shp'
-cgShpLit (S.MatConn row col shp') =
-    C.Strct [ ("kind", C.mkLiterally "DIM_MAT")
-            , ("row", callShpExp row)
-            , ("col", callShpExp col) ] : cgShpLit shp'
-cgShpLit shp@(S.BlkOf _) = error $ "[CgStInit] | TODO " ++ pprShow shp
+
+cgShpLit' :: S.Shp (TVar Typ) -> CgM [(TVar C.Typ, C.Stmt (TVar C.Typ))]
+cgShpLit' S.Scalar = return []
+cgShpLit' (S.SingConn e shp') = 
+    do v <- freshId Anon Local ty_AugurDim
+       rest <- cgShpLit' shp'
+       return $ (v, cgShpExpLit' v e) : rest
+cgShpLit' (S.MatConn row col shp') =
+    do v <- freshId Anon Local ty_AugurDim
+       let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_MAT") ]))
+           s2 = C.assignStmt' (f v "row") (callShpExp row)
+           s3 = C.assignStmt' (f v "col") (callShpExp col)
+       rest <- cgShpLit' shp'
+       return $ (v, C.seqStmt [s1, s2, s3]) : rest
+    where
+      f v = C.strctProj' (C.Var v)
+cgShpLit' shp = error $ "[CudaC.CgStInit] | Shouldn't happen " ++ pprShow shp
 
     
 callShpExp :: S.ShpExp (TVar Typ) -> C.Exp (TVar C.Typ)
@@ -207,18 +225,20 @@ cgAuxShp chk loc v_strct v shp =
       _ ->
           do v_dims <- freshId Anon Local ty_AugurDim
              v_shp <- freshId Anon Local ty_AugurShape
+             (vs, inits) <- cgShpLit' shp >>= return . unzip
              let numdims = S.lenShp shp
-                 e_dims = C.Lit (C.Array (map C.Lit (cgShpLit shp)))
+                 s_inits = C.seqStmt inits
+                 e_dims = C.Lit (C.Array (map C.Var vs))
                  s_dims = C.Declare (C.ConstArr v_dims numdims) (Just e_dims)
                  e_args = [ C.Var v_dims
                           , C.mkInt numdims
-                          , C.mkLiterally (ty2AugurTy (baseTy (getType' v))) ] -- TODO: Hacked typ?
-                 s_shp = C.assignStmt v_shp (C.LibCall "h_augur_shape_stk_alloc" e_args)                 
+                          , C.mkLiterally (ty2AugurTy (baseTy (getType' v))) ]
+                 s_shp = C.assignStmt v_shp (C.LibCall "h_augur_shape_stk_alloc" e_args)
                  e_args' = [ loc, cgExpXfer v dst, C.addrOf (C.Var v_shp) ]
                  s_xfer = C.mkLibCall "h_augur_rtval_from_shape" e_args'
                  s_free = C.mkLibCall "h_augur_shape_stk_free" [ C.addrOf (C.Var v_shp) ]
                  s_chk = if chk then cgChkNative loc v_strct v else C.mkSkip
-             return $ C.seqStmt [ s_dims, s_shp, s_xfer, s_free, s_chk ]
+             return $ C.seqStmt [ s_inits, s_dims, s_shp, s_xfer, s_free, s_chk ]
     where
       v' = cgId v
       dst = C.derefStrct v_strct v'
@@ -346,8 +366,7 @@ cgBlkKernAux shpCtx loc v_strct = go
       go (Base kind _ _ allocs _ _) =
           case kind of
             GradProp (HMC _ _ _ _) ->
-                do traceM $ "ALLOCS: " ++ pprShowLs allocs
-                   let v_grad = fst (allocs !! 0)
+                do let v_grad = fst (allocs !! 0)
                        v_mom0 = fst (allocs !! 1)
                        v_mom = fst (allocs !! 2)
                    s1 <- case Map.lookup v_grad shpCtx of
@@ -435,7 +454,6 @@ cgStInit inferCtx shpCtx loc kern =
        grpParamsCurr <- mapM (\(v, vs) -> cgXferBlk vCurr vs v) modBlkCtx
        grpParamsProp <- mapM (\(v, vs) -> cgXferBlk vProp vs v) modBlkCtx
        kernBlks <- cgBlkKernAux shpCtx loc vAux kern
-       -- let chkGlobs = map (\(v, _) -> cgChkNative loc vAux v) (Map.toList shpCtx)
        let -- BEWARE: blocks are added but should not be transfered
            mparams = filter (not . isBlkTy . getType') (getModParamIds modDecls)
            params = map (\v -> (cgId (v { t_idKind = Param }), cgTypXfer (idKind v) (getType' v))) (getModHyperIds modDecls ++ mparams ++ getModDataIds modDecls)
@@ -443,17 +461,19 @@ cgStInit inferCtx shpCtx loc kern =
                     , C.Declare (C.Fwd vCurr) (Just (C.addrOf exp_MCMC_CURR))
                     , C.Declare (C.Fwd vProp) (Just (C.addrOf exp_MCMC_PROP)) ]
            s1 = C.assignStmt' (C.derefStrct vAux vRng) (C.LibCall "augur_rng_setup" [ C.mkInt 0 ])
-           s2 = C.mkLibCall "initMcmc" []
-           s3 = C.seqStmt (cgKernParamInit (C.Var vAux) kern)
+           v_idxs = cgId (getIdxVar inferCtx)
+           s2 = C.assignStmt' (C.derefStrct vAux v_idxs) (C.LibCall "h_augur_idx_setup" [ loc, C.mkInt 10 ])
+           s3 = C.mkLibCall "initMcmc" []
+           s4 = C.seqStmt (cgKernParamInit (C.Var vAux) kern)
            bodys = [ strcts
                    , xferHypers
                    , xferParamsCurr, xferDataCurr
                    , xferParamsProp, xferDataProp                   
                    , globs
                    , grpParamsCurr, grpParamsProp, [ kernBlks ]
-                   , [ s1, s2, s3 ] ]
+                   , [ s1, s2, s3, s4 ] ]
            body = C.seqStmt (concat bodys)
-       return $ C.Fun [] (mkName "augur_iface_init") params body Nothing C.VoidTy
+       return $ C.Fun [C.Extern] (mkName "augur_iface_init") params body Nothing C.VoidTy
     where
       h vCurr vProp v =
           let v' = cgId v
@@ -461,8 +481,8 @@ cgStInit inferCtx shpCtx loc kern =
             C.assignStmt' (C.derefStrct vProp v') (C.derefStrct vCurr v')
 
              
-cgStSetPt :: CompInfo -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
-cgStSetPt cinfo inferCtx =
+cgStSetPt :: CompInfo -> Target -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
+cgStSetPt cinfo target inferCtx =
     do let modDecls = ic_modDecls inferCtx
        v_curr <- lift $ mkTyIdIO (getGenSym cinfo) Anon Local (C.PtrTy ty_AugurMod)
        v_prop <- lift $ mkTyIdIO (getGenSym cinfo) Anon Local (C.PtrTy ty_AugurMod)
@@ -470,26 +490,26 @@ cgStSetPt cinfo inferCtx =
                  , C.assignStmt v_prop (C.addrOf exp_MCMC_PROP) ]
            mparams = filter (not . isBlkTy . getType') (getModParamIds modDecls)
            params = map (\v -> (cgId (v { t_idKind = Param }), cgTypXfer (idKind v) (getType' v))) mparams                    
-           loc = exp_AUGUR_CPU
+           loc = targetToExp target
            scpy1 = map (cgXferToNative loc v_curr True) (getModParamIds modDecls)
            scpy2 = map (cgXferToNative loc v_prop True) (getModParamIds modDecls)
            body = C.seqStmt (foo ++ scpy1 ++ scpy2 )
-       return $ C.Fun [] (mkName "augur_set_pt") params body Nothing C.VoidTy
+       return $ C.Fun [C.Extern] (mkName "augur_set_pt") params body Nothing C.VoidTy
 
 
              
-cgStCpy :: CompInfo -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
-cgStCpy cinfo inferCtx  =
+cgStCpy :: CompInfo -> Target -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
+cgStCpy cinfo target inferCtx =
     do let modDecls = ic_modDecls inferCtx
        v_mod <- lift $ mkTyIdIO (getGenSym cinfo) Anon Local (C.PtrTy ty_AugurMod)
        let foo = [ C.assignStmt v_mod (C.addrOf exp_MCMC_CURR) ]
            mparams = filter (not . isBlkTy . getType') (getModParamIds modDecls)
            params = map (\v -> (cgId (v { t_idKind = Param }), cgTypXfer (idKind v) (getType' v))) mparams                    
-           loc = exp_AUGUR_CPU
+           loc = targetToExp target
            scpy = map (cgXferFromNative loc v_mod) (getModParamIds modDecls)
            body = C.seqStmt (foo ++ scpy )
            eLL = projMCMC "currLL"
-       return $ C.Fun [] (mkName "augur_cpy") params body (Just eLL) C.DblTy
+       return $ C.Fun [C.Extern] (mkName "augur_cpy") params body (Just eLL) C.DblTy
 
 
               
@@ -505,18 +525,18 @@ initCgRdr cinfo v_rng =
        return $ CR v_rng v_aux v_curr v_prop genSym
 
               
-runCgStInit :: CompInfo -> TVar C.Typ -> InferCtx (TVar Typ) -> S.ShpCtx (TVar Typ) -> Kern code (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
-runCgStInit cinfo v_rng inferCtx shpCtx kern =
+runCgStInit :: CompInfo -> Target -> TVar C.Typ -> InferCtx (TVar Typ) -> S.ShpCtx (TVar Typ) -> Kern code (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
+runCgStInit cinfo target v_rng inferCtx shpCtx kern =
     do rdr <- initCgRdr cinfo v_rng
-       let loc = C.mkLiterally enum_AUGUR_CPU
+       let loc = targetToExp target
        (v, _, _) <- runRWST (cgStInit inferCtx shpCtx loc kern) rdr ()
        return v
 
 
-runCgStSetPt :: CompInfo -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
+runCgStSetPt :: CompInfo -> Target -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
 runCgStSetPt = cgStSetPt
               
-runCgStCpy :: CompInfo -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
+runCgStCpy :: CompInfo -> Target -> InferCtx (TVar Typ) -> CompM (C.Decl (TVar C.Typ))
 runCgStCpy cinfo inferCtx =
     cgStCpy cinfo inferCtx
 
@@ -538,5 +558,32 @@ runCgCallLLMod =
     do let params = []
            body = C.mkSkip
            retExp = Just $ C.LibCall "ll_mod" [ exp_MCMC_AUX, exp_MCMC_CURR ]
-       return $ C.Fun [] (mkName "augur_get_curr_ll") params body retExp C.DblTy
+       return $ C.Fun [C.Extern] (mkName "augur_get_curr_ll") params body retExp C.DblTy
  
+
+
+
+{-
+cgShpExpLit :: S.ShpExp (TVar Typ) -> C.Lit (TVar C.Typ)
+cgShpExpLit (S.Cpy x) =
+    C.Strct [ ("kind", C.mkLiterally "DIM_CPY")
+            , ("cpyty", C.mkLiterally (ty2AugurTy (getType' x)))
+            , ("cpyof", cgShpId x) ]
+cgShpExpLit (S.Val e) =
+    C.Strct [ ("kind", C.mkLiterally "DIM_VAL")
+            , ("val", cgConstExp e) ]
+cgShpExpLit (S.MaxDim x axis) =
+    C.Strct [ ("kind", C.mkLiterally "DIM_MAX")
+            , ("objty", C.mkLiterally enum_AUGUR_VEC)
+            , ("obj", cgShpId x)
+            , ("dim", C.mkInt axis) ]
+
+cgShpLit :: S.Shp (TVar Typ) -> [C.Lit (TVar C.Typ)]
+cgShpLit S.Scalar = []
+cgShpLit (S.SingConn e shp') = cgShpExpLit e : cgShpLit shp'
+cgShpLit (S.MatConn row col shp') =
+    C.Strct [ ("kind", C.mkLiterally "DIM_MAT")
+            , ("row", callShpExp row)
+            , ("col", callShpExp col) ] : cgShpLit shp'
+cgShpLit shp@(S.BlkOf _) = error $ "[CgStInit] | TODO " ++ pprShow shp
+-}

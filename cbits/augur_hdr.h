@@ -55,7 +55,10 @@ typedef gsl_rng augur_rng;
 #include <curand_kernel.h>
 
 #include <thrust/transform_reduce.h>
+#include <thrust/inner_product.h>
+#include <thrust/device_ptr.h>
 #include <thrust/functional.h>
+#include <thrust/execution_policy.h>
 
 typedef curandState_t augur_rng;
 

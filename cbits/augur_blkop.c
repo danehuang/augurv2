@@ -119,8 +119,7 @@ void h_augur_blk_dump(AugurMemLoc_t loc, AugurBlk_t* blk) {
     printf("blk[idx=%d, ty=%s]\n", i, ty2str(blk->typs[i]));
     switch (blk->typs[i]) {
     case AUGUR_DBL: {
-      // TODO: IMPLEMENT ME
-      printf("%f\n", * ((double*) blk->blks[i]));
+      h_augur_dbl_dump(loc, ((double*) blk->blks[i]));
       break;
     }
     case AUGUR_VEC: {
@@ -130,7 +129,9 @@ void h_augur_blk_dump(AugurMemLoc_t loc, AugurBlk_t* blk) {
 	break;
       }
       case TRUE: {
+	printf("BEFORE FLAT VEC DUMP\n");
 	h_augur_flat_vec_dump(loc, (AugurFlatVec_t*) blk->blks[i]);
+	printf("AFTER FLAT VEC DUMP\n");
 	break;
       }
       }
@@ -152,7 +153,6 @@ void h_augur_blk_dump(AugurMemLoc_t loc, AugurBlk_t* blk) {
 /* Block operations */
 
 void h_augur_blk_zero(AugurMemLoc_t loc, AugurBlk_t* blk) {
-  h_augur_blk_dump(AUGUR_CPU, blk);
   for (uint_t i = 0; i < blk->num_blks; i++) {
     void* blk_data = h_augur_blk_obj_get_data(blk->typs[i], blk->blks[i]);
     uint_t numbytes = h_augur_blk_obj2numbytes(blk->typs[i], blk->blks[i]);
@@ -160,36 +160,63 @@ void h_augur_blk_zero(AugurMemLoc_t loc, AugurBlk_t* blk) {
   }
 }
 
-void h_augur_blk_scale(AugurMemLoc_t loc, double a, AugurBlk_t* blk) {
-  for (uint_t i = 0; i < blk->num_blks; i++) {
-    double* blk_data = (double*) h_augur_blk_obj_get_data(blk->typs[i], blk->blks[i]);
-    uint_t elems = h_augur_blk_obj2elems(blk->typs[i], blk->blks[i]);
-#ifdef AUGURCPU
-    for (uint_t j = 0; j < elems; j++) {
-      blk_data[j] = a * blk_data[j];
-    }
-#else
-    // TODO: IMPLEMENT ME
+
+#ifndef AUGURCPU
+__global__ void kernel_augur_blk_scaler(uint_t elems, real_t scale, real_t* blk_data) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < elems) {
+    blk_data[idx] = scale * blk_data[idx];
+  }
+}
 #endif
+
+void h_augur_blk_scale(AugurMemLoc_t loc, real_t scale, AugurBlk_t* blk) {
+  for (uint_t i = 0; i < blk->num_blks; i++) {
+    real_t* blk_data = (real_t*) h_augur_blk_obj_get_data(blk->typs[i], blk->blks[i]);
+    uint_t elems = h_augur_blk_obj2elems(blk->typs[i], blk->blks[i]);
+    switch (loc) {
+    case AUGUR_CPU: {
+      for (uint_t j = 0; j < elems; j++) {
+	blk_data[j] = scale * blk_data[j];
+      }
+      break;
+    }
+#ifndef AUGURCPU
+    case AUGUR_GPU: {
+      kernel_augur_blk_scaler<<<BLKS(elems), THRDS>>>(elems, scale, blk_data);
+      break;
+    }
+#endif
+    }
   }
 }
 
+
+#ifndef AUGURCPU
+__global__ void kernel_augur_blk_plusr(uint_t elems, real_t* dst_data, real_t* b1_data, real_t* b2_data) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < elems) {
+    dst_data[idx] = b1_data[idx] + b2_data[idx];
+  }
+}
+#endif
+
 void h_augur_blk_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, AugurBlk_t* b2) {
   for (uint_t i = 0; i < dst->num_blks; i++) {
-    double* dst_data = (double*) h_augur_blk_obj_get_data(dst->typs[i], dst->blks[i]);
-    double* b1_data = (double*) h_augur_blk_obj_get_data(b1->typs[i], b1->blks[i]);
-    double* b2_data = (double*) h_augur_blk_obj_get_data(b2->typs[i], b2->blks[i]);
+    real_t* dst_data = (real_t*) h_augur_blk_obj_get_data(dst->typs[i], dst->blks[i]);
+    real_t* b1_data = (real_t*) h_augur_blk_obj_get_data(b1->typs[i], b1->blks[i]);
+    real_t* b2_data = (real_t*) h_augur_blk_obj_get_data(b2->typs[i], b2->blks[i]);
     uint_t elems = h_augur_blk_obj2elems(dst->typs[i], dst->blks[i]);
     switch (loc) {
     case AUGUR_CPU: {
       for (uint_t j = 0; j < elems; j++) {
-	dst_data[j] = b1_data[j] + b2_data[j];
+        dst_data[j] = b1_data[j] + b2_data[j];
       } 
       break;
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      // TODO: IMPLEMENT ME
+      kernel_augur_blk_plusr<<<BLKS(elems), THRDS>>>(elems, dst_data, b1_data, b2_data);
       break;
     }
 #endif
@@ -197,11 +224,21 @@ void h_augur_blk_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, AugurB
   }
 }
 
+
+#ifndef AUGURCPU
+__global__ void kernel_augur_blk_scale_plusr(uint_t elems, real_t* dst_data, real_t* b1_data, real_t scale, real_t* b2_data) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < elems) {
+    dst_data[idx] = b1_data[idx] + scale * b2_data[idx];
+  }
+}
+#endif
+
 void h_augur_blk_scale_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, real_t scale, AugurBlk_t* b2) {
   for (uint_t i = 0; i < dst->num_blks; i++) {
-    double* dst_data = (double*) h_augur_blk_obj_get_data(dst->typs[i], dst->blks[i]);
-    double* b1_data = (double*) h_augur_blk_obj_get_data(b1->typs[i], b1->blks[i]);
-    double* b2_data = (double*) h_augur_blk_obj_get_data(b2->typs[i], b2->blks[i]);
+    real_t* dst_data = (real_t*) h_augur_blk_obj_get_data(dst->typs[i], dst->blks[i]);
+    real_t* b1_data = (real_t*) h_augur_blk_obj_get_data(b1->typs[i], b1->blks[i]);
+    real_t* b2_data = (real_t*) h_augur_blk_obj_get_data(b2->typs[i], b2->blks[i]);
     uint_t elems = h_augur_blk_obj2elems(dst->typs[i], dst->blks[i]);
     switch (loc) {
     case AUGUR_CPU: {
@@ -212,7 +249,7 @@ void h_augur_blk_scale_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, 
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      // TODO: IMPLEMENT ME
+      kernel_augur_blk_scale_plusr<<<BLKS(elems), THRDS>>>(elems, dst_data, b1_data, scale, b2_data);
       break;
     }
 #endif
@@ -225,7 +262,7 @@ void h_augur_blk_minus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, Augur
 }
 
 real_t h_augur_blk_dot(AugurMemLoc_t loc, AugurBlk_t* b1, AugurBlk_t* b2) {
-  double acc = 0.0;
+  real_t acc = 0.0;
   for (uint_t i = 0; i < b1->num_blks; i++) {
     double* b1_data = (double*) h_augur_blk_obj_get_data(b1->typs[i], b1->blks[i]);
     double* b2_data = (double*) h_augur_blk_obj_get_data(b2->typs[i], b2->blks[i]);
@@ -239,7 +276,10 @@ real_t h_augur_blk_dot(AugurMemLoc_t loc, AugurBlk_t* b1, AugurBlk_t* b2) {
     }
 #ifndef AUGURCPU
     case AUGUR_GPU: {
-      // TODO: IMPLEMENT ME
+      // acc += thrust::inner_product(b1_data, b1_data + elems, b2_data, 0.0);
+      thrust::device_ptr<double> d_a = thrust::device_pointer_cast(b1_data);
+      thrust::device_ptr<double> d_b = thrust::device_pointer_cast(b2_data);
+      acc += thrust::inner_product(d_a, d_a + elems, d_b, 0.0);      
       break;
     }
 #endif
@@ -323,12 +363,13 @@ void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, Aug
   for (uint_t i = 0; i < num_blks; i++) {
     switch (typs[i]) {
     case AUGUR_DBL: {
-      double* d = (double*) augur_malloc(sizeof(double), AUGUR_CPU);
+      double* d = (double*) augur_malloc(sizeof(double), loc);
       dst->blks[i] = d;
       base_elems += 1;
       break;
     }
     case AUGUR_VEC: {
+      // NOTE: Allocate top-level structure on CPU
       AugurFlatVec_t* fvec = (AugurFlatVec_t*) augur_malloc(sizeof(AugurFlatVec_t), AUGUR_CPU);
       h_augur_vec_to_native(loc, fvec, (AugurVec_t*) blks[i], FALSE);
       dst->blks[i] = fvec;
@@ -336,6 +377,7 @@ void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, Aug
       break;
     }
     case AUGUR_MAT: {
+      // NOTE: Allocate top-level structure on CPU
       AugurMat_t* mat = (AugurMat_t*) augur_malloc(sizeof(AugurMat_t), AUGUR_CPU);
       h_augur_mat_to_native(loc, mat, (AugurMat_t*) blks[i], FALSE);
       dst->blks[i] = mat;
@@ -407,11 +449,11 @@ void hi_augur_blk_from_native(AugurMemLoc_t loc, AugurBlk_t* dst, char** src_dat
     default: {
       // TODO: ERROR
       break;
-    }      
+    }
     }
   }
 }
-
+ 
 void h_augur_blk_from_native(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src) {
   char* src_data = (char*) src->base_data;
   hi_augur_blk_from_native(loc, dst, &src_data);

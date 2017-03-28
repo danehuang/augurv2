@@ -98,4 +98,4 @@ runDetFn' :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> b -> Fn b 
 runDetFn' cinfo copt inferCtx v_mod fn =
     do v <- runDetFn cinfo copt inferCtx v_mod fn
        -- TODO: Is this sound? when i update the current, should i also update the proposal?
-       return $ LX.LowPP (LX.LowXX Map.empty False v) 
+       return $ LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) [] v) 

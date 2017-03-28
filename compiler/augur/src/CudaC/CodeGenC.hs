@@ -81,46 +81,7 @@ cgRng es =
     do v_rng <- asks cr_vRng
        return $ C.Var v_rng : es
 
-           
-cgProj :: Typ -> C.Exp (TVar C.Typ) -> [C.Exp (TVar C.Typ)] -> C.Exp (TVar C.Typ)
-cgProj ty e es =
-    C.LibCall (getProjLibFn ty (length es)) (e:es)
-
-
-{-| [Note]
-
-Expects simpl projections, i.e., at most 1 indexing.
-
->> x :: <Local, RealTy>[] :+= erhs
-<< x += erhs
-
->> x :: <ModParam, RealTy>[] :+= erhs
-<< AUGUR_SETD(x, erhs)
-
->> x :: <Local, Vec RealTy>[e] := erhs
-<< AUGUR_VEC_SETD(x, e, erhs)
-
->> x[e_1,..,e_n] := erhs
-
-elhs_1 = AUGUR_VEC_GETV(x, e_1)
-...
-elhs_{n-1} = AUGUR_VEC_GETV(x, e_{n-1})
-AUGUR_VEC_SETI(elhs_{n-1}, e_n, erhs)
-
--}
-cgStore :: TVar Typ -> [C.Exp (TVar C.Typ)] -> UpKind -> C.Exp (TVar C.Typ) -> CgM (C.Exp (TVar C.Typ))
-cgStore x es uk erhs =
-    case getStoreLibFn (idKind x) uk (getType' x) (projBaseTy (getType' x) es) of
-      Left lib ->          
-          do let es_args = if prmtStoreDst (idKind x) uk (getType' x)
-                           then [ C.addrOf e_dst ] ++ es ++ [ erhs ]
-                           else [ e_dst ] ++ es ++ [ erhs ]
-             return $ C.LibCall lib es_args
-      Right aop -> return $ C.Assign e_dst aop erhs
-    where
-      e_dst = C.Var (cgIdLhs x)
-                   
-           
+              
 cgExp :: Exp (TVar Typ) -> CgM (C.Exp (TVar C.Typ))
 cgExp (Var x) = return $ cgIdRhs x
 cgExp (Lit lit) =
@@ -162,57 +123,66 @@ cgGen x (Until e1 e2) =
        return ( C.Assign (C.Var x') C.EqAss e1'
               , C.Binop (C.Var x') C.Lt e2'
               , C.Assign (C.Var x') C.PlusEqAss 1 )
-    
+
+
+cgMcmcCall :: Exp (TVar Typ) -> CgM (C.Stmt (TVar C.Typ))
+cgMcmcCall (Call (PrimId _ _ (MWG prop swap mwg)) es) =
+    do es' <- mapM cgExp es
+       vAux <- asks cr_vAux
+       vCurr <- asks cr_vCurr
+       vProp <- asks cr_vProp
+       vArr <- freshId Anon Local C.IntTy
+       vView <- freshId Anon Local (C.VecTy C.IntTy)
+       vIdxs <- freshId Anon Local (C.PtrTy (C.VecTy C.IntTy))
+       let idxs = drop 3 es'
+           s_arr = C.Declare (C.ConstArr vArr (length idxs)) (Just (C.Lit (C.Array idxs)))
+           es_viewArgs = [ C.mkLiterally enum_AUGUR_DBL
+                         , C.Var vArr
+                         , C.mkInt (length idxs) ]
+           s_view = C.Exp $ C.Assign (C.Var vView) C.EqAss (C.LibCall "augur_arr_view_as_vec" es_viewArgs)
+           s_idxs = C.Exp $ C.Assign (C.Var vIdxs) C.EqAss (C.addrOf (C.Var vView))
+           v_ll = case es !! 2 of
+                    Var x -> cgIdLhs x
+                    _ -> compErr $ "HAXORZ alert"
+           es'' = [ C.Var vAux, C.Var vCurr, C.Var vProp, C.Var v_ll, C.Var vIdxs, C.mkLiterally (nameToStr prop), C.mkLiterally (nameToStr swap), C.mkLiterally (nameToStr mwg) ]
+           s_call = C.Exp $ C.LibCall "h_augur_mcmc_mwg" es''
+       return $ C.seqStmt [ s_arr, s_view, s_idxs, s_call ]
+cgMcmcCall (Call (PrimId _ _ (EllipSlice likeOne)) es) =
+    do es' <- mapM cgExp es
+       vAux <- asks cr_vAux
+       vCurr <- asks cr_vCurr
+       vProp <- asks cr_vProp
+       vArr <- freshId Anon Local (C.IntTy)
+       vView <- freshId Anon Local (C.VecTy C.IntTy)
+       vIdxs <- freshId Anon Local (C.PtrTy (C.VecTy C.IntTy))
+       let idxs = drop 6 es'
+           s_arr = C.Declare (C.ConstArr vArr (length idxs)) (Just (C.Lit (C.Array idxs)))
+           s_view = C.Exp $ C.Assign (C.Var vView) C.EqAss (C.LibCall "augur_arr_view_as_vec" [ C.mkLiterally enum_AUGUR_DBL, C.Var vArr, C.mkInt (length idxs) ])
+           s_idxs = C.Exp $ C.Assign (C.Var vIdxs) C.EqAss (C.addrOf (C.Var vView))
+           es'' = [ C.Var vAux, C.Var vCurr, C.Var vProp ] ++ (take 6 es') ++ [ C.Var vIdxs, C.Lit (C.Literally (nameToStr likeOne)) ]
+           s_call = C.Exp $ C.LibCall "augur_mcmc_eslice" es''
+       return $ C.seqStmt [ s_arr, s_view, s_idxs, s_call ]
+cgMcmcCall (Call (PrimId _ _ (LeapFrog grad prop)) es) =
+    do es' <- mapM cgExp es
+       vAux <- asks cr_vAux
+       vCurr <- asks cr_vCurr
+       vProp <- asks cr_vProp
+       let es'' = [ C.Lit (C.Literally "AUGUR_CPU"), C.Var vAux, C.Var vCurr, C.Var vProp ] ++ es' ++ [ C.Lit (C.Literally (nameToStr grad)), C.Lit (C.Literally (nameToStr prop)) ]
+           s_call = C.Exp $ C.LibCall "h_augur_mcmc_hmc" es''
+       return s_call
+cgMcmcCall _ =
+    return $ C.mkSkip
+       
+       
 -- TODO: UGHHH Refactor me             
 cgStmt :: Stmt (TVar Typ) -> CgM (C.Stmt (TVar C.Typ))
 cgStmt Skip =
     return $ C.mkSkip
 cgStmt (Exp e) =
     case e of
-      Call (PrimId _ _ (MWG prop swap mwg)) es ->
-          do es' <- mapM cgExp es
-             vAux <- asks cr_vAux
-             vCurr <- asks cr_vCurr
-             vProp <- asks cr_vProp
-             vArr <- freshId Anon Local C.IntTy
-             vView <- freshId Anon Local (C.VecTy C.IntTy)
-             vIdxs <- freshId Anon Local (C.PtrTy (C.VecTy C.IntTy))
-             let idxs = drop 3 es'
-                 s_arr = C.Declare (C.ConstArr vArr (length idxs)) (Just (C.Lit (C.Array idxs)))
-                 es_viewArgs = [ C.mkLiterally enum_AUGUR_DBL
-                               , C.Var vArr
-                               , C.mkInt (length idxs) ]
-                 s_view = C.Exp $ C.Assign (C.Var vView) C.EqAss (C.LibCall "augur_arr_view_as_vec" es_viewArgs)
-                 s_idxs = C.Exp $ C.Assign (C.Var vIdxs) C.EqAss (C.addrOf (C.Var vView))
-                 v_ll = case es !! 2 of
-                          Var x -> cgIdLhs x
-                          _ -> compErr $ "HAXORZ alert"
-                 es'' = [ C.Var vAux, C.Var vCurr, C.Var vProp, C.Var v_ll, C.Var vIdxs, C.mkLiterally (nameToStr prop), C.mkLiterally (nameToStr swap), C.mkLiterally (nameToStr mwg) ]
-                 s_call = C.Exp $ C.LibCall "h_augur_mcmc_mwg" es''
-             return $ C.seqStmt [ s_arr, s_view, s_idxs, s_call ]
-      Call (PrimId _ _ (EllipSlice likeOne)) es ->
-          do es' <- mapM cgExp es
-             vAux <- asks cr_vAux
-             vCurr <- asks cr_vCurr
-             vProp <- asks cr_vProp
-             vArr <- freshId Anon Local (C.IntTy)
-             vView <- freshId Anon Local (C.VecTy C.IntTy)
-             vIdxs <- freshId Anon Local (C.PtrTy (C.VecTy C.IntTy))
-             let idxs = drop 6 es'
-                 s_arr = C.Declare (C.ConstArr vArr (length idxs)) (Just (C.Lit (C.Array idxs)))
-                 s_view = C.Exp $ C.Assign (C.Var vView) C.EqAss (C.LibCall "augur_arr_view_as_vec" [ C.mkLiterally enum_AUGUR_DBL, C.Var vArr, C.mkInt (length idxs) ])
-                 s_idxs = C.Exp $ C.Assign (C.Var vIdxs) C.EqAss (C.addrOf (C.Var vView))
-                 es'' = [ C.Var vAux, C.Var vCurr, C.Var vProp ] ++ (take 6 es') ++ [ C.Var vIdxs, C.Lit (C.Literally (nameToStr likeOne)) ]
-                 s_call = C.Exp $ C.LibCall "augur_mcmc_eslice" es''
-             return $ C.seqStmt [ s_arr, s_view, s_idxs, s_call ]
-      Call (PrimId _ _ (LeapFrog grad prop)) es ->
-          do es' <- mapM cgExp es
-             vAux <- asks cr_vAux
-             vCurr <- asks cr_vCurr
-             vProp <- asks cr_vProp
-             let es'' = [ C.Lit (C.Literally "AUGUR_CPU"), C.Var vAux, C.Var vCurr, C.Var vProp ] ++ es' ++ [ C.Lit (C.Literally (nameToStr grad)), C.Lit (C.Literally (nameToStr prop)) ]
-                 s_call = C.Exp $ C.LibCall "h_augur_mcmc_hmc" es''
-             return s_call
+      Call (PrimId _ _ (MWG _ _ _)) _ ->  cgMcmcCall e
+      Call (PrimId _ _ (EllipSlice _)) _ -> cgMcmcCall e
+      Call (PrimId _ _ (LeapFrog _ _)) _ -> cgMcmcCall e
       _ ->
           do e' <- cgExp e
              return $ C.Exp e'
@@ -237,7 +207,7 @@ cgStmt (Assign x e) =
 cgStmt (Store x es uk e) =
     do es' <- mapM cgExp es
        e' <- cgExp e
-       estore <- cgStore x es' uk e'
+       let estore = cgStore x es' uk e'
        return $ C.Exp estore
 cgStmt (Seq s1 s2) =
     do s1' <- cgStmt s1
@@ -257,13 +227,13 @@ cgStmt (MapRed acc x gen s e) =
        s' <- cgStmt s
        e' <- cgExp e
        let acc' = cgIdLhs acc
-           sass = C.assignStmt acc' 0
+           sass = C.assignStmt acc' (C.Lit (C.Dbl 0))
            sacc = C.Exp (C.Assign (C.Var acc') C.PlusEqAss e')
        return $ C.Seq sass (C.For e1' e2' e3' (C.Seq s' sacc))
 
-                                         
+              
 cgDeclMain :: InferCtx (TVar Typ) -> LX.LowMM (TVar Typ) -> CgM (C.Decl (TVar C.Typ))
-cgDeclMain inferCtx (LX.LowMM (LX.LowXX _ useProp decl)) =
+cgDeclMain inferCtx (LX.LowMM (LX.LowXX _ useProp cc projIdx decl)) =
     do let Fun name params allocs body retExp retTy = decl
        v_rng <- asks cr_vRng
        v_aux <- asks cr_vAux

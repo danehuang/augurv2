@@ -22,16 +22,16 @@
 char* ty2str(AugurTyp_t ty) {
   switch (ty) {
   case AUGUR_INT: {
-    return "INT_TY";
+    return (char*) "INT_TY";
   }
   case AUGUR_DBL: {
-    return "DBL_TY";
+    return (char*) "DBL_TY";
   }
   case AUGUR_VEC: {
-    return "VEC_TY";
+    return (char*) "VEC_TY";
   }
   case AUGUR_MAT: {
-    return "MAT_TY";
+    return (char*) "MAT_TY";
   }
   default: {
     // TODO: ERROR
@@ -75,7 +75,7 @@ void hi_augur_int_to_native(AugurMemLoc_t loc, char** dst_data, int* src, Bool_t
 }
 
 void h_augur_int_to_native(AugurMemLoc_t loc, int* dst, int* src, Bool_t f_cpy) {
-  dst = augur_malloc(sizeof(int), loc);
+  dst = (int*) augur_malloc(sizeof(int), loc);
   char* char_dst = (char*) dst;
   hi_augur_int_to_native(loc, &char_dst, src, f_cpy);
 }
@@ -121,7 +121,7 @@ void hi_augur_dbl_to_native(AugurMemLoc_t loc, char** dst_data, double* src, Boo
 }
 
 void h_augur_dbl_to_native(AugurMemLoc_t loc, double* dst, double* src, Bool_t f_cpy) {
-  dst = augur_malloc(sizeof(double), loc);
+  dst = (double*) augur_malloc(sizeof(double), loc);
   char* char_dst = (char*) dst;
   hi_augur_dbl_to_native(loc, &char_dst, src, f_cpy);
 }
@@ -171,3 +171,41 @@ void h_augur_basety_cpy_data(AugurMemLoc_t loc, void* dst, void* src, AugurTyp_t
   }
   }
 }
+
+
+/* Printing */
+
+void h_augur_int_dump(AugurMemLoc_t loc, int* p) {
+  switch (loc) {
+  case AUGUR_CPU: {
+    printf("%d\n", *p);
+    break;
+  }
+#ifndef AUGURCPU
+  case AUGUR_GPU: {
+    int tmp;
+    augur_memcpy(&tmp, p, sizeof(int), AUGUR_D2H);
+    printf("%d\n", tmp);
+    break;
+  }
+#endif
+  }
+}
+
+void h_augur_dbl_dump(AugurMemLoc_t loc, double* p) {
+  switch (loc) {
+  case AUGUR_CPU: {
+    printf("%f\n", *p);
+    break;
+  }
+#ifndef AUGURCPU
+  case AUGUR_GPU: {
+    double tmp;
+    augur_memcpy(&tmp, p, sizeof(double), AUGUR_D2H);
+    printf("%f\n", tmp);
+    break;
+  }
+#endif
+  }
+}
+

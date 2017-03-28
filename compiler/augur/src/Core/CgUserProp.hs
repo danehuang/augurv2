@@ -112,78 +112,68 @@ data PropRdr b =
     PR { pr_prop :: Name
        , pr_swap :: Name
        , pr_like :: Name
-       , pr_vIdxs :: b
        , pr_vLLCorrect :: b
        , pr_vDir :: b
        , pr_propVarsM :: Map.Map b b }
-
-    
-projIdxs :: b -> [b] -> [L.Stmt b]
-projIdxs vIdxs idxs =
-    map (\(v, i) -> L.Assign v (L.Proj (L.Var vIdxs) [L.Lit (L.Int i)])) (zip idxs [0..])
-
 
         
 -----------------------------------
 -- == Transformation
 
+getDensPtPropVar :: (TypedVar b Typ) => Exp b -> PropM b b
+getDensPtPropVar pt = 
+    do propVarsM <- asks pr_propVarsM
+       case Map.lookup (densPtVar pt) propVarsM of
+         Just v -> return v
+         Nothing -> error $ "[Core.CgUserProp] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM
+
+
 propBody :: (TypedVar b Typ) => Fn b -> PropM b (L.Stmt b)
 propBody (Dens dist pt es) =
-    do propVarsM <- asks pr_propVarsM
-       vLLCorrect <- asks pr_vLLCorrect
-       let v_prop = case Map.lookup (densPtVar pt) propVarsM of
-                      Just v -> v 
-                      Nothing -> error $ "[CgProp] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM                              
-           pt' = mkDensPt v_prop (densPtIdx' pt)
+    do vLLCorrect <- asks pr_vLLCorrect
+       v_prop <- getDensPtPropVar pt
+       let pt' = mkDensPt v_prop (densPtIdx' pt)
            e_rhs = L.DistOp Sample DM_Fn dist (map cgExp es)
            s_prop = L.Store v_prop (map cgExp (densPtIdx' pt)) L.Update e_rhs
            llArgs = [ L.DistOp LL DM_Fn dist (map cgExp (pt : es))
                     , L.DistOp LL DM_Fn dist (map cgExp (pt' : es)) ]
-           s_ll = L.Store vLLCorrect [] L.Update (L.Call (L.PrimId DM_Fn PM_Fn Minus) llArgs)       
+           s_ll = L.Store vLLCorrect [] L.Update (L.Call (L.PrimId DM_Fn PM_Fn Minus) llArgs)
        return $ L.seqStmt [ s_prop, s_ll ]
-propBody (Ind _ _) = error $ "[CgProp] | Shouldn't happen"
+propBody (Ind _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
 propBody (Let x e fn) =
     do s <- propBody fn
        return $ L.Seq (L.Assign x (cgExp e)) s
-propBody (Prod _ _) = error $ "[CgProp] | Shouldn't happen"
-propBody (Pi x gen fn) =
-    do let gen' = cgGen gen
-       s <- propBody fn
-       return $ L.Loop L.Sequential x gen' s
-
+propBody (Prod _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
+propBody (Pi _ _ fn) = propBody fn
+    
 
 propDecl :: (TypedVar b Typ) => Fn b -> PropM b (L.Decl b)
 propDecl fn =
     do name <- asks pr_prop
        body <- propBody fn
-       v_idxs <- asks pr_vIdxs
        v_llCorrect <- asks pr_vLLCorrect
-       let params = [ (v_idxs, getType' v_idxs) ]
+       let idxs = densPtIdx (gatherDensPt fn)
+           params = map (\idx -> (setIdKind idx GridIdx, IntTy)) idxs
            allocs = [ v_llCorrect ]
-           idxs = densPtIdx (gatherDensPt fn)
-           body' = L.seqStmt (body : projIdxs v_idxs idxs)
-       return $ L.Fun name params allocs body' Nothing UnitTy
+       return $ L.Fun name params allocs body Nothing UnitTy
               
               
 swapBody :: (TypedVar b Typ) => Fn b -> PropM b (L.Stmt b)
 swapBody (Dens _ pt _) =
-    do propVarsM <- asks pr_propVarsM
-       v_dir <- asks pr_vDir
+    do v_dir <- asks pr_vDir
        let v_mod = densPtVar pt
-           v_mod' = case Map.lookup (densPtVar pt) propVarsM of
-                      Just v -> v
-                      Nothing -> error $ "[CgProp] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM
-           pt' = mkDensPt v_mod' (densPtIdx' pt)
+       v_mod' <- getDensPtPropVar pt
+       let pt' = mkDensPt v_mod' (densPtIdx' pt)
            idxs = map cgExp (densPtIdx' pt)
            s1 = L.Store v_mod idxs L.Update (cgExp pt')
            s2 = L.Store v_mod' idxs L.Update (cgExp pt)
            e_cond = L.Call (L.PrimId DM_Fn PM_Fn EqEq) [ L.Var v_dir, L.Lit (L.Int 0) ]
        return $ L.If e_cond s1 s2
-swapBody (Ind _ _) = error $ "[CgProp] | Shouldn't happen"
+swapBody (Ind _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
 swapBody (Let x e fn) =
     do s <- swapBody fn
        return $ L.Seq (L.Assign x (cgExp e)) s
-swapBody (Prod _ _) = error $ "[CgProp] | Shouldn't happen"
+swapBody (Prod _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
 swapBody (Pi _ _ fn) = swapBody fn
 
                        
@@ -192,31 +182,28 @@ swapDecl fn =
     do name <- asks pr_swap
        body <- swapBody fn
        v_dir <- asks pr_vDir
-       v_idxs <- asks pr_vIdxs
-       let params = [ (v_idxs, getType' v_idxs), (v_dir, getType' v_dir) ]
+       let idxs = densPtIdx (gatherDensPt fn)
+           params = (v_dir, getType' v_dir) : map (\idx -> (setIdKind idx GridIdx, IntTy)) idxs
            allocs = []
-           idxs = densPtIdx (gatherDensPt fn)
-           body' = L.seqStmt (projIdxs v_idxs idxs ++ [ body ])
-       return $ L.Fun name params allocs body' Nothing UnitTy
+       return $ L.Fun name params allocs body Nothing UnitTy
 
                        
 mwgBody :: (TypedVar b Typ) => Fn b -> PropM b (L.Stmt b)
 mwgBody (Dens _ pt _) =
     do v_llCorrect <- asks pr_vLLCorrect
-       propVarsM <- asks pr_propVarsM
+       -- propVarsM <- asks pr_propVarsM
        prop <- asks pr_prop
        swap <- asks pr_swap
        like <- asks pr_like
-       let pt' = case Map.lookup (densPtVar pt) propVarsM of
-                   Just v -> mkDensPt v (densPtIdx' pt)
-                   Nothing -> error $ "[CgProp] | Lookup of " ++ pprShow (densPtVar pt) ++ " failed in context: " ++ pprShow propVarsM
+       v_mod' <- getDensPtPropVar pt
+       let pt' = mkDensPt v_mod' (densPtIdx' pt)           
            args = [ cgExp pt, cgExp pt', L.Var v_llCorrect ] ++ map cgExp (densPtIdx' pt)
        return $ L.Exp (L.Call (L.PrimId DM_Fn PM_Fn (MWG prop swap like)) args)
-mwgBody (Ind _ _) = error $ "[CgProp] | Shouldn't happen"
+mwgBody (Ind _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
 mwgBody (Let x e fn) =
     do s <- mwgBody fn
        return $ L.Seq (L.Assign x (cgExp e)) s
-mwgBody (Prod _ _) = error $ "[CgProp] | Shouldn't happen"
+mwgBody (Prod _ _) = error $ "[Core.CgUserProp] | Shouldn't happen"
 mwgBody (Pi x gen fn) =
     do let gen' = cgGen gen
        s <- mwgBody fn
@@ -239,9 +226,10 @@ mwgAllDecls v_mod fn =
        prop <- propDecl fn
        swap <- swapDecl fn
        mwg <- mwgDecl v_mod fn
-       let prop' = LX.LowPP (LX.LowXX (Map.singleton v_llCorrect S.Scalar) True prop)
-           swap' = LX.LowPP (LX.LowXX Map.empty True swap)
-           mwg' = LX.LowPP (LX.LowXX (Map.singleton v_llCorrect S.Scalar) True mwg)
+       let idxs = densPtIdx (gatherDensPt fn)
+           prop' = LX.LowPP (LX.LowXX (Map.singleton v_llCorrect S.Scalar) True (LX.DevCall False) idxs prop)
+           swap' = LX.LowPP (LX.LowXX Map.empty True (LX.DevCall False) idxs swap)
+           mwg' = LX.LowPP (LX.LowXX (Map.singleton v_llCorrect S.Scalar) True (LX.HostCall False) [] mwg)
        return (prop', swap', mwg')
 
 
@@ -251,26 +239,22 @@ mwgAllDecls v_mod fn =
 
 runMwgAllDecls :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> b -> Fn b -> Fn b -> CompM (LX.LowPP b, LX.LowPP b, LX.LowPP b, LX.LowPP b)
 runMwgAllDecls cinfo copt inferCtx v_mod fcFn propFn =
-    do v_idxs <- lift $ mkTyIdIO (getGenSym cinfo) (mkName "idxs") Param (VecTy IntTy)
-       v_llCorrect <- lift $ mkTyIdIO (getGenSym cinfo) Anon ModAux RealTy
+    do v_llCorrect <- lift $ mkTyIdIO (getGenSym cinfo) Anon ModAux RealTy
        v_dir <- lift $ mkTyIdIO (getGenSym cinfo) (mkName "dir") Param IntTy
-       likeOne <- runLLFnOne cinfo copt inferCtx v_mod fcFn
-       let likeOne' = LX.LowPP (LX.LowXX Map.empty False likeOne)
+       (s_projIdx, likeOne) <- runLLFnOne cinfo copt inferCtx v_mod fcFn
+       let likeOne' = LX.LowPP (LX.LowXX Map.empty False (LX.DevCall True) s_projIdx likeOne)
            propName = mkCompName "prop" (varName v_mod)
            swapName = mkCompName "swap" (varName v_mod)
            likeName = (L.declName likeOne)
-           rdr = PR propName swapName likeName v_idxs v_llCorrect v_dir (ic_dupCtx inferCtx)
+           rdr = PR propName swapName likeName v_llCorrect v_dir (ic_dupCtx inferCtx)
        (prop', swap', mwg') <- runReaderT (mwgAllDecls v_mod propFn) rdr
        return (prop', swap', likeOne', mwg')
 
               
--- TODO: Mising like (but never used)
 runMwgKern :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> b -> Fn b -> Fn b -> CompM (K.Kern (LX.LowPP b) b)
 runMwgKern cinfo copt inferCtx v_mod fcFn propFn =
     do (prop, swap, like, mwg) <- runMwgAllDecls cinfo copt inferCtx v_mod fcFn propFn
        let kind = K.UserProp (K.MWG prop swap like mwg)
-           like' = error "[Core.CgUserProp] @runMwgKern | Do not deref" -- TODO: HACK
+           like' = error "[Core.CgUserProp] @runMwgKern | Do not deref"
            kern = K.Base kind (K.Single v_mod) fcFn [] [] like'
        return kern
-
-

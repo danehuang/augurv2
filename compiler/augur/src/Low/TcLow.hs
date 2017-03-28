@@ -241,10 +241,12 @@ runTcDecl inferCtx decl =
            dupCtx = ic_dupCtx inferCtx
            modDeclsCtx = Map.fromList (map (\(_, x, ty) -> (x, ty)) modDecls)
            dupCtxCtx = Map.fromList (map (\v -> (fromJust (Map.lookup v dupCtx), getType' v)) (getModParamIds modDecls))
+           shpCtx = Map.singleton (getIdxVar inferCtx) (VecTy IntTy)
+           ctx = modDeclsCtx `Map.union` dupCtxCtx `Map.union` shpCtx
        traceM $ "[TC] | ModDecls: " ++ pprShow modDeclsCtx
        traceM $ "[TC] | DupCtx: " ++ pprShow dupCtx
        traceM $ "[TC] | DECL: \n" ++ pprShow decl
-       (v, tyCtx) <- runStateT (runExceptT (tcDecl decl)) (modDeclsCtx `Map.union` dupCtxCtx)
+       (v, tyCtx) <- runStateT (runExceptT (tcDecl decl)) ctx
        traceM $ "END OF TC" ++ pprShow tyCtx
        case v of
          Left errMsg -> return $ Left errMsg

@@ -14,7 +14,7 @@
  - limitations under the License.
  -}
 
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 
 module CudaC.CudaCSyn where
 
@@ -58,18 +58,18 @@ newtype Prog b = Prog { unProg :: [Decl b] }
 data Decl b = Fun [Attrib] Name [(b, Typ)] (Stmt b) (Maybe (Exp b)) Typ
             | Struct String [(b, Typ)] (Maybe String)
             | ThrustFunc Name [(b, Typ)] [(b, Typ)] (Stmt b) (Maybe (Exp b)) Typ
-            deriving Show
+            deriving (Show, Functor, Foldable, Traversable)
                     
 data Stmt b = Exp (Exp b)
             | Declare (Declare b) (Maybe (Exp b))
             | Seq (Stmt b) (Stmt b)
             | If (Exp b) (Stmt b) (Maybe (Stmt b))
             | For (Exp b) (Exp b) (Exp b) (Stmt b)
-              deriving Show
+              deriving (Show, Functor, Foldable, Traversable)
 
 data Declare b = Fwd b
                | ConstArr b Int
-                 deriving Show
+                 deriving (Show, Functor, Foldable, Traversable)
                        
 data Exp b = Var b
            | Lit (Lit b)
@@ -81,7 +81,7 @@ data Exp b = Var b
            | Unary Uop (Exp b)
            | Binop (Exp b) Bop (Exp b)
            | Cast Typ (Exp b)
-             deriving Show
+             deriving (Show, Functor, Foldable, Traversable)
                       
 data Lit b = Int Int
            | Dbl Double
@@ -89,7 +89,7 @@ data Lit b = Int Int
            | Array [Exp b]             -- ughh, fuck compound lit bullshit
            | Strct [(String, Exp b)]   -- ughh, fuck compound lit bullshit
            | Literally String
-           deriving Show 
+           deriving (Show , Functor, Foldable, Traversable)
                   
 data Aop = EqAss
          | EqAssStaticArr
@@ -166,8 +166,62 @@ instance Pretty (Decl (TVar Typ)) where
         where
           pprField (x, ty) = ppr ty <+> ppr x <> semi
                              
-    ppr (ThrustFunc name _ _ body retExp retTy) = error "TODO | Thrust"
-                 
+    ppr (ThrustFunc name sparams params body retExp retTy) =
+        vcat [ hang (text "struct" <+> ppr name <+> lbrace) 2 func, rbrace <> semi ]
+        where
+          func =
+              vcat [ vcat (map pprSParam sparams)
+                   , ctor
+                   , fun ]
+
+          pprSParam (x, ty) =
+              text "const" <+> ppr ty <+> ppr x <> semi
+                            
+          ctor =
+              text "__host__ __device__" <+> ppr name <> parens (sepBy' commasp pprSParam' sparams) <+> colon <+> (sepBy' commasp pprSParam'' sparams) <+> braces empty
+
+          pprSParam' (x, ty) =
+              ppr ty <+> text "_" <> ppr x
+
+          pprSParam'' (x, _) =
+              ppr x <> parens (text "_" <> ppr x)
+                   
+          fun =
+              vcat [ hang (text "__host__ __device__" <+> ppr retTy <+> text "operator()" <> parens (sepBy' commasp pprParam params) <+> text "const" <+> lbrace) 2 (vcat [ ppr body, pprRet retExp ]), rbrace ]
+
+          pprParam (x, ty) =
+              text "const" <+> ppr ty <> text "&" <+> ppr x
+
+          pprRet (Just ret) = text "return" <+> ppr ret <+> semi
+          pprRet Nothing = text "return" <+> semi
+        -- error "TODO | Thrust"
+
+{-
+rep tab ' ' ++ "struct " ++ emitC 0 name ++ " {\n" ++
+            sepByStr "\n" (map (emitSParam (tab + 2)) sparams) ++ "\n" ++
+            rep (tab + 2) ' ' ++ "__host__ __device__ " ++ emitC 0 name ++ "(" ++ sepByStr ", " (map emitSParam' sparams) ++ ") : " ++ sepByStr ", " (map emitSParam'' sparams) ++ " {} " ++ "\n" ++
+            rep (tab + 2) ' ' ++ "__host__ __device__ " ++ emitC 0 retTy ++ " operator()(" ++ sepByStr "," (map emitParam params) ++ ") const {\n" ++
+            emitC (tab + 4) body ++ "\n" ++ emitRet (tab + 4) ret ++ "\n" ++
+            rep (tab + 2) ' ' ++ "}\n" ++
+            rep tab ' ' ++ "};"
+        where          
+          emitSParam tab (x, ty) =
+              rep tab ' ' ++ "const " ++ emitC 0 ty ++ " " ++ emitC 0 x ++ ";"
+
+          emitSParam' (x, ty) =
+              emitC 0 ty ++ " _" ++ emitC 0 x
+
+          emitSParam'' (x, _) =
+              emitC 0 x ++ "(_" ++ emitC 0 x ++ ")"
+                    
+          emitParam (x, ty) =
+              "const " ++ emitC 0 ty ++ "& " ++ emitC 0 x
+                  
+          emitRet tab (Just ret) = rep tab ' ' ++ "return " ++ emitC 0 ret ++ ";"
+          emitRet tab Nothing = rep tab ' ' ++ "return;"
+-}
+
+                                                  
 instance Pretty (Stmt (TVar Typ)) where
     ppr (Exp e) =
         case e of
@@ -226,6 +280,7 @@ instance Pretty (Lit (TVar Typ)) where
     ppr (Strct fields) = braces (sepBy' commasp pprField fields)
         where
           pprField (name, lit) = text "." <> text name <+> text "=" <+> ppr lit
+          -- pprField (_, lit) = ppr lit
     ppr (Literally str) = text str
 
 instance Pretty Aop where
@@ -315,3 +370,16 @@ mkLibCall fn es = Exp (LibCall fn es)
 
 mkSkip :: Stmt b
 mkSkip = Exp (mkInt 0)
+
+
+
+mkLt :: Exp b -> Exp b -> Exp b
+mkLt e1 e2 = Binop e1 Lt e2
+
+             
+mkLte :: Exp b -> Exp b -> Exp b
+mkLte e1 e2 = Binop e1 Lte e2
+
+              
+mkAnd :: Exp b -> Exp b -> Exp b
+mkAnd e1 e2 = Binop e1 And e2

@@ -83,4 +83,10 @@ void h_augur_dbl_from_native(AugurMemLoc_t loc, double* dst, double* src);
 
 void h_augur_basety_cpy_data(AugurMemLoc_t loc, void* dst, void* src, AugurTyp_t ty);
 
+
+/* Printing */
+
+void h_augur_int_dump(AugurMemLoc_t loc, int* p);
+void h_augur_dbl_dump(AugurMemLoc_t loc, double* p);
+
 #endif

@@ -406,11 +406,11 @@ conjFn cinfo copt inferCtx v_mod fn =
                 stat' <- runLint copt stat (Lint.runLintDecl cinfo False inferCtx)
                 samp' <- runLint copt samp (Lint.runLintDecl cinfo False inferCtx)
                 let like' = samp' -- TODO: Hack, but never used
-                    stat'' = LX.LowPP (LX.LowXX shpM False stat')
-                    samp'' = LX.LowPP (LX.LowXX shpM False samp')
+                    stat'' = LX.LowPP (LX.LowXX shpM False (LX.HostCall False) [] stat')
+                    samp'' = LX.LowPP (LX.LowXX shpM False (LX.HostCall False) [] samp')
                     kind = K.Gibbs (K.Conj stat'' samp'')
                     allocs = map (\v -> (v, K.Reset)) (L.declAllocs stat)
-                    like'' = LX.LowPP (LX.LowXX shpM False like')
+                    like'' = error $ "[Core.CgConj] | Shouldn't dereference"-- LX.LowPP (LX.LowXX shpM False LX.HostCall like') -- TODO: Hack, but never used
                     kern = K.Base kind (K.Single v_mod) fn allocs [] like''
                 return kern
 

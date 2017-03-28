@@ -150,7 +150,13 @@ chkGenAdjM v =
                   
 incAdj :: TyId -> [L.Exp TyId] -> L.Exp TyId -> GradM (L.Stmt TyId)
 incAdj v_adj idxs erhs =
-    return $ L.Store v_adj idxs L.AtmInc erhs
+    case idKind v_adj of
+      Local -> 
+          do traceM $ "LOCAL: " ++ show v_adj
+             return $ L.Store v_adj idxs L.Inc erhs
+      _ -> 
+          do traceM $ "OTHER: " ++ show v_adj
+             return $ L.Store v_adj idxs L.AtmInc erhs
             
 
 
@@ -198,12 +204,12 @@ gradDist top x dist es =
                            let s_v1 = L.Assign v (initZero (getType' v) (cgExp (mkDensPt y idxs)))
                            (s_adj, adj_y) <- mkAdjId y
                            let e_rhs = L.DistOp dop DM_Fn dist es'
-                               s_v2 = L.Store v [] L.AtmInc e_rhs
+                               -- s_v2 = L.Store v [] L.AtmInc e_rhs
+                           s_v2 <- incAdj v [] e_rhs
                            s <- incAdj adj_y (map cgExp idxs) (L.Var v)
                            return $ L.seqStmt [ s_v1, s_adj, s_v2, s ]
                    else return L.Skip
             _ -> return L.Skip
-              
 
 
 gradDotProd :: TyId -> [Exp TyId] -> GradM (L.Stmt TyId)

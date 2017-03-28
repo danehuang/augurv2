@@ -94,12 +94,14 @@ cgStrctDecl v = (cgId v, ty)
 cgAuxStruct :: InferCtx TyId -> S.ShpCtx TyId -> [TyId] -> TVar C.Typ -> ReprM (C.Decl CTyId)
 cgAuxStruct inferCtx shpCtx kernParams v_rng =
     do let rng = (v_rng, getType' v_rng)
+           v_idxs = cgId (getIdxVar inferCtx)
+           idxs = (v_idxs, C.VecTy C.IntTy)
            modDecls = ic_modDecls inferCtx
            hypers = map cgStrctDecl (getModHyperIds modDecls)
            allocs = map cgStrctDecl (map fst (Map.toList shpCtx))
            kernParams' = map cgStrctDecl kernParams
        traceM $ "[CgMcmcRepr] | modDecls " ++ show (getModDeclIds modDecls)
-       return $ C.Struct "AugurAux" (rng : hypers ++ allocs ++ kernParams') (Just "AugurAux_t")
+       return $ C.Struct "AugurAux" ([ rng, idxs ] ++ hypers ++ allocs ++ kernParams') (Just "AugurAux_t")
        
              
 cgModStruct :: InferCtx TyId -> Kern c TyId -> ReprM (C.Decl CTyId)

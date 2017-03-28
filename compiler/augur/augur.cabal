@@ -11,7 +11,7 @@ author:              Daniel Eachern Huang
 maintainer:          dan.e.huang@gmail.com
 -- copyright:           
 -- category:            
-build-type:          Simple
+build-type:          Configure
 -- extra-source-files:  
 cabal-version:       >=1.18
 
@@ -67,6 +67,11 @@ library
     CudaC.CgKern
     CudaC.CgStInit
     CudaC.XfaceCudaC
+    CudaC.BlkSyn
+    CudaC.PllBlk
+    CudaC.CgCuda
+    CudaC.SplitBlk
+    CudaC.RtSize
     Low.LinLow
     Low.LowXXSyn
     Low.LintLow
@@ -76,11 +81,13 @@ library
     Low.TcLow
     Low.LowShpSyn
     Low.LowpPrimSyn
+    Low.InlineLow
+    Low.DepLow
     Rv.RvSyn
     Xface.PySyn
   -- other-extensions:
-  extra-libraries:     HSrts-ghc7.8.4 
-  build-depends:       base >= 4.7 && < 4.8, 
+  -- extra-libraries:     HSrts-ghc7.8.4 
+  build-depends:       base, 
                        mtl >= 2.2.1, 
                        containers, 
                        transformers, 
@@ -93,7 +100,7 @@ library
 
 executable cmd
   main-is:             Main.hs
-  build-depends:       base >= 4.7 && < 4.8, 
+  build-depends:       base, 
                        mtl >= 2.2.1, 
                        containers >= 0.5.5.1, 
                        transformers >= 0.5.2.0,

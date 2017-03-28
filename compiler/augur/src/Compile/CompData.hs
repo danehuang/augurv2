@@ -55,18 +55,21 @@ runComp = runExceptT
 -- == Compiler information
 
 data CompInfo =
-    CompInfo { cinfo_genSym :: GenSym   -- Symbol generator
+    CompInfo { getGenSym :: GenSym      -- ^ Symbol generator
              }
 
+{-    
 getGenSym :: CompInfo -> GenSym
 getGenSym = cinfo_genSym
+-}
 
             
 -----------------------------------
 -- == Compiler options
            
 data CompOpt =
-    CompOpt { f_lint :: Bool            -- Lint flag
+    CompOpt { f_lint :: Bool            -- ^ Lint flag
+            , getTarget :: Target       -- ^ Target
             }
 
 getLint :: CompOpt -> Bool
@@ -149,5 +152,4 @@ data GPUStrat = BlkStrat
 
 data Target = CPU
             | GPU GPUStrat
-            | Device
               deriving (Show)

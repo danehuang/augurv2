@@ -26,7 +26,6 @@
 #include <math.h>
 #include <gsl/gsl_rng.h>
 
-
 typedef struct mcmc {
   AugurMod_t curr;
   AugurMod_t prop;
@@ -86,13 +85,15 @@ Bool_t augur_mcmc_ar( double auxll
 /**
  * Returns TRUE if we should accept, FALSE if we should reject.
  */
-Bool_t augur_mcmc_ar_idx( double auxll
-			, AugurVec_t* idxs
-			, double (*objFn)(AugurAux_t, AugurMod_t, AugurVec_t* idxs)
-		        ) {
-  double currll = objFn(MCMC.aux, MCMC.curr, idxs);
-  double propll = objFn(MCMC.aux, MCMC.prop, idxs);
-  double u = gsl_rng_uniform(h_rng);
+__HOSTORDEV__ Bool_t augur_mcmc_ar_idx
+       ( double auxll
+       , AugurAux_t aux, AugurMod_t curr, AugurMod_t prop
+       , double (*objFn)(AugurAux_t, AugurMod_t)
+       ) {
+  double currll = objFn(aux, curr);
+  double propll = objFn(aux, prop);
+  // double u = gsl_rng_uniform(h_rng);
+  double u = augur_std_uniform_sample(aux.rng);
 
   if (augur_log(u) < propll - currll + auxll) {
     return TRUE;
@@ -171,22 +172,22 @@ double h_sample_uniform(gsl_rng* rng, double left, double right) {
 
 
 /**
- * Metropololis-within-gibbs Kernel.
+ * Metropololis-within-gibbs Kernel. (Note it is host/dev code)
  */
-void h_augur_mcmc_mwg
+__HOSTORDEV__ void augur_mcmc_mwg
       ( AugurAux_t aux, AugurMod_t curr, AugurMod_t prop
-      , double* llCorrect, AugurVec_t* idxs
-      , void (*proposal)(AugurAux_t, AugurMod_t, AugurMod_t, AugurVec_t*)
-      , void (*swap)(AugurAux_t, AugurMod_t, AugurMod_t, AugurVec_t*, int)
-      , double (*objFn)(AugurAux_t, AugurMod_t, AugurVec_t*) ) {
-  proposal(aux, curr, prop, idxs);
-  if (augur_mcmc_ar_idx(*llCorrect, idxs, objFn)) {
+      , double* llCorrect
+      , void (*proposal)(AugurAux_t, AugurMod_t, AugurMod_t)
+      , void (*swap)(AugurAux_t, AugurMod_t, AugurMod_t, int)
+      , double (*objFn)(AugurAux_t, AugurMod_t) ) {
+  proposal(aux, curr, prop);
+  if (augur_mcmc_ar_idx(*llCorrect, aux, curr, prop, objFn)) {
     // Accept, so copy proposal theta into current theta (maintain invariant)
-    swap(aux, curr, prop, idxs, 0);
+    swap(aux, curr, prop, 0);
   }
   else {
     // Reject, so copy current theta into proposal theta (maintain invariant)
-    swap(aux, curr, prop, idxs, 1);
+    swap(aux, curr, prop, 1);
   }
 }
   
@@ -402,11 +403,10 @@ __HOSTORDEV__ void augur_mcmc_eslice
       , AugurVec_t* curr_theta, AugurVec_t* prop_theta
       , AugurVec_t* mean, AugurMat_t* cov
       , AugurMat_t* L, AugurVec_t* nu
-      , AugurVec_t* idxs
-      , double (*objfn)(AugurAux_t, AugurMod_t, AugurVec_t*) ) {
+      , double (*objfn)(AugurAux_t, AugurMod_t) ) {
   augur_mvnormal_sample(aux.rng, nu, mean, cov, L, nu);
   double u = augur_std_uniform_sample(aux.rng);
-  double log_y = objfn(aux, curr, idxs) + augur_log(u);
+  double log_y = objfn(aux, curr) + augur_log(u);
   
   double theta = augur_uniform_sample(aux.rng, 0.0, 2.0 * AUGUR_PI);
   double theta_min = theta - 2.0 * AUGUR_PI;
@@ -416,9 +416,7 @@ __HOSTORDEV__ void augur_mcmc_eslice
     double diff = theta_max - theta_min;
     if (diff < 1e-8) {
       // Maintain invariant that curr == prop
-      for (uint_t i = 0; i < prop_theta->elems; i++) {
-	AUGUR_VEC_SETD(prop_theta, i, AUGUR_VEC_GETD(curr_theta, i));
-      }
+      augur_vec_cpy(prop_theta, curr_theta);
       break;
     }
 
@@ -430,12 +428,10 @@ __HOSTORDEV__ void augur_mcmc_eslice
       AUGUR_VEC_SETD(prop_theta, i, a + b + mean_i);
     }
 
-    double prop_ll = objfn(aux, prop, idxs);
+    double prop_ll = objfn(aux, prop);
     if (prop_ll > log_y) {      
       // Maintain invariant that curr == prop
-      for (uint_t i = 0; i < curr_theta->elems; i++) {
-	AUGUR_VEC_SETD(curr_theta, i, AUGUR_VEC_GETD(prop_theta, i));
-      }
+      augur_vec_cpy(curr_theta, prop_theta);
       break;
     }
 

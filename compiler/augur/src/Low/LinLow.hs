@@ -186,7 +186,7 @@ runLinDecl :: (TypedVar b t) => GenSym -> Bool -> Decl b -> CompM (Decl b)
 runLinDecl genSym linProj decl =
     runReaderT (linDecl decl) (LR linProj genSym)
 
-
+               
 
 runLinDecl' :: (TypedVar b t) => GenSym -> Bool -> Decl b -> IO (Decl b)
 runLinDecl' genSym linProj decl =

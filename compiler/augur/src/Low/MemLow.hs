@@ -473,7 +473,7 @@ lowerStmt (MapRed acc x gen s e) =
 
               
 lowerDecl :: (TypedVar b Typ) => LX.LowPP b -> LowerM b (Decl b)
-lowerDecl (LX.LowPP (LX.LowXX shpCtx _ (Fun name params allocs body retExp retTy))) =
+lowerDecl (LX.LowPP (LX.LowXX shpCtx _ cc _ (Fun name params allocs body retExp retTy))) =
     do body' <- lowerStmt body
        clearStmts
        retExp' <- case retExp of
@@ -496,7 +496,9 @@ runLowerDecl cinfo copt inferCtx lowppDecl =
        decl'' <- runLint copt decl' (Lint.runLintDecl cinfo False inferCtx)
        shpCtx' <- runShpiDecl inferCtx (LX.getGlobs (LX.unLowPP lowppDecl)) decl''
        let useAux = LX.useMcmcPropSt (LX.unLowPP lowppDecl)
-           lowmmDecl = LX.LowMM (LX.LowXX shpCtx' useAux decl'')
+           cc = LX.getCC (LX.unLowPP lowppDecl)
+           projIdx = LX.projIdx (LX.unLowPP lowppDecl)
+           lowmmDecl = LX.LowMM (LX.LowXX shpCtx' useAux cc projIdx decl'')
        debugM "Low.MemLow" $ "LowMM (Output):\n" ++ pprShow lowmmDecl
        return $ lowmmDecl
           

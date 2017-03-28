@@ -155,7 +155,8 @@ runRnDeclTyVar' cinfo copt varsM modDecls decl =
     do let genSym = getGenSym cinfo       
            -- varsM = Map.fromList (map (\(x, _, x', _) -> (x, x')) modDecls)
        (v, _, _) <- runRWST (rnDecl decl) (RR varsM genSym) varsM
-       runLint copt v (Lint.runLintDecl cinfo False (IC Map.empty Map.empty modDecls))
+       let mockInferCtx = (IC Map.empty Map.empty modDecls (error "[Low.RnLow] | Shouldn't access"))
+       runLint copt v (Lint.runLintDecl cinfo False mockInferCtx)
 
 runRnDeclTyVar :: CompInfo -> CompOpt -> Map.Map String (TVar Typ) -> ModDecls (TVar Typ) -> Decl String -> IO (Either String (Decl (TVar Typ)))
 runRnDeclTyVar cinfo copt varsM modDecls decl =

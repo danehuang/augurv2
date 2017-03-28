@@ -14,7 +14,7 @@
  - limitations under the License.
  -}
 
-{-# LANGUAGE LambdaCase, ForeignFunctionInterface #-}
+{-# LANGUAGE LambdaCase, ForeignFunctionInterface, FlexibleContexts #-}
 
 module FFI.AugurFFI where
  
@@ -44,13 +44,18 @@ wordsWhen p s =
 
 type FFIM = ExceptT String IO
                            
-parseInput :: CString -> Int -> CString -> Int -> CString -> FFIM (Model, Maybe (KernU String), [Int])
-parseInput sModel target sInfer userMode sSizes =
+parseInput :: CString -> Int -> CString -> Int -> CString -> FFIM (Model, Maybe (KernU String), [Int], Target)
+parseInput sModel sTarget sInfer userMode sSizes =
     do model <- parseModel       
        kern <- parseInfer userMode
        sizes <- parseSizes
-       return $ (model, kern, sizes)
+       target <- parseTarget sTarget
+       return $ (model, kern, sizes, target)
     where
+      parseTarget 0 = return CPU
+      parseTarget 1 = return (GPU BlkStrat)
+      parseTarget _ = throwError $ "ERROR" ++ sep ++ "target: " ++ show sTarget ++ " not supported"
+      
       parseModel =
           do model <- lift $ peekCString sModel
              case runParseModel model of
@@ -76,8 +81,8 @@ hs_compile sModel target sInfer userMode sSizes =
     do v <- runExceptT (parseInput sModel target sInfer userMode sSizes)
        case v of
          Left errMsg -> newCString $ "ERROR" ++ sep ++ errMsg
-         Right (model, kern, sizes) ->
-             runComp (C.compile model kern) >>= \case
+         Right (model, kern, sizes, target) ->
+             runComp (C.compile model kern target) >>= \case
                Left errMsg ->
                    newCString $ "ERROR" ++ sep ++ errMsg
                Right (pyModParam, pyTys, inferHdr, inferCode) ->

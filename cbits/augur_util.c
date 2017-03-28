@@ -35,6 +35,7 @@ void GPU_CHK_ERR(cudaError_t code) {
   }
 }
 
+// Compute capability shenanigans
 __device__ double atomicAdd(double* address, double val) {
     unsigned long long int* address_as_ull =
                              (unsigned long long int*)address;
@@ -84,6 +85,7 @@ void* augur_malloc(uint_t numbytes, AugurMemLoc_t loc) {
   }
 #endif
   }
+  return NULL;
 }
 
 void augur_free(void* ptr, AugurMemLoc_t loc) {
@@ -137,7 +139,7 @@ void augur_memset(void* dst, int val, uint_t numbytes, AugurMemLoc_t loc) {
   }
 #ifndef AUGURCPU
   case AUGUR_GPU: {
-    GPU_CHK_ERR(cudaMemset(dst, value, numbytes));
+    GPU_CHK_ERR(cudaMemset(dst, val, numbytes));
     break;
   }
 #endif

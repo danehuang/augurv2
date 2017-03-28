@@ -52,6 +52,15 @@ type LintM = CompM
 -----------------------------------
 -- == Transformations
 
+{-
+lintStmt :: (TypedVar b Typ) => GenSym -> Bool -> InferCtx b -> Stmt b -> LintM (Stmt b)
+lintStmt genSym linProj inferCtx stmt =
+    do stmt' <- Lin.runLinStmt genSym linProj decl
+       let stmt'' = canonizeStmt stmt'
+       stmt''' <- (liftIO $ Tc.runTcDecl inferCtx decl'') >>= hoistExcept
+       return decl'''
+-}
+
 lintDecl :: (TypedVar b Typ) => GenSym -> Bool -> InferCtx b -> Decl b -> LintM (Decl b)
 lintDecl genSym linProj inferCtx decl =
     do decl' <- Lin.runLinDecl genSym linProj decl

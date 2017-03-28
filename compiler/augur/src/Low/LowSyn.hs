@@ -122,7 +122,7 @@ instance (Pretty b) => Pretty (Decl b) where
           
           pprRet (Just e) = text "return" <+> ppr e <+> semi
           pprRet Nothing = empty
-                 
+                           
 instance (Pretty b) => Pretty (Stmt b) where
     ppr Skip = text "skip" <> semi
     ppr (Exp e) = ppr e <> semi
@@ -137,7 +137,7 @@ instance (Pretty b) => Pretty (Stmt b) where
     ppr (Loop lk x gen s) =
         -- ppr lk <+> text "loop" <> parens (ppr x <+> text "<-" <+> ppr gen) <+> braces (nest 2 (ppr s))
         vcat [ hang (ppr lk <+> text "loop" <> parens (ppr x <+> text "<-" <+> ppr gen) <+> lbrace) 2 (ppr s), rbrace ]
-    ppr (MapRed acc x gen s e) = text "mapred" <> parens (ppr x <+> text "<-" <+> ppr gen) <+> braces (nest 2 (vcat [ ppr s, text "return" <+> ppr e <+> semi ])) <+> text "->" <+> ppr acc
+    ppr (MapRed acc x gen s e) = vcat [ hang (ppr acc <+> text "=" <+> text "mapred" <> parens (ppr x <+> text "<-" <+> ppr gen) <+> lbrace) 2 (vcat [ ppr s, text "return" <+> ppr e <+> semi ]), rbrace ]
            
 instance Pretty LoopKind where
     ppr Sequential = text "seq"
@@ -196,7 +196,17 @@ instance (Ord b) => FreeVar b (Exp b) where
     fvs (Call _ es) = fvsLs es
     fvs (Proj e es) = fvs e `Set.union` fvsLs es
 
-
+{-                      
+instance (Ord b) => FreeVar b (Stmt b) where
+    fvs Skip = Set.empty
+    fvs (Exp e) = fvs e
+    fvs (Assign _ e) = fvs e
+    fvs (Store _ es _ e') = fvsLs es `Set.union` fvs e'
+    fvs (Seq s1 s2) = fvs s1 `Set.union` fvs s2
+    fvs (If e s1 s2) = fvs e `Set.union` fvs s1 `Set.union` fvs s2
+    fvs (Loop _ x gen s) = (Set.delete x (fvs gen)) `Set.union` fvs s
+    fvs (MapRed acc x gen s e) = Set.delete acc ((Set.delete x (fvs gen)) `Set.union` fvs s `Set.union` fvs e)
+-}
 
 
 instance (Ord b) => Substitutable b (Stmt b) (Exp b) where
@@ -250,7 +260,7 @@ declName (Fun n _ _ _ _ _) = n
 
 declName' :: Decl b -> String
 declName' = nameToStr . declName
-                             
+            
 declParams :: Decl b -> [(b, Typ)]
 declParams (Fun _ params _ _ _ _) = params
                                     
@@ -292,6 +302,19 @@ data LStmt' b = LAtm (Stmt b)
               | LLoop LoopKind b (Gen b) (LStmt b)
               | LMapRed b b (Gen b) (LStmt b) (Exp b)
 
+instance (Ord b) => Substitutable b (LStmt' b) (Exp b) where
+    substP p x term = sub
+        where
+          sub (LAtm s) = LAtm (substP p x term s)
+          sub (LIf e s1 s2) = LIf (substP p x term e) (map sub s1) (map sub s2)
+          sub (LLoop lk y gen s)
+              | x `p` y = LLoop lk y (substP p x term gen) s
+              | otherwise = LLoop lk y (substP p x term gen) (map sub s)
+          sub (LMapRed acc y gen s e)
+              | x `p` y = LMapRed acc y (substP p x term gen) s (substP p x term e)
+              | otherwise = LMapRed acc y (substP p x term gen) (map sub s) (substP p x term e)
+
+                
 splat :: (TypedVar b Typ) => Stmt b -> LStmt b
 splat Skip = []
 splat (Exp e) = [LAtm (Exp e)]

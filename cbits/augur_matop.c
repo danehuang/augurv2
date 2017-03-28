@@ -31,7 +31,20 @@ __HOSTDEV__ AugurVec_t augur_mat_getv(AugurMat_t* mat, uint_t idx) {
   vec.ty = mat->ty;
   vec.stride = 0; // TODO???
   vec.elems = mat->col;
-  vec.data = mat->data + (mat->row * idx);
+  switch (mat->ty) {
+  case AUGUR_INT: {
+    vec.data = ((int*) mat->data) + (mat->row * idx);
+    break;
+  }
+  case AUGUR_DBL: {
+    vec.data = ((double*) mat->data) + (mat->row * idx);
+    break;
+  }
+  default: {
+    // TODO: ERROR
+    break;
+  }
+  }
   return vec;
 }
 
@@ -182,7 +195,7 @@ void h_augur_mat_cpy_data(AugurMemLoc_t loc, AugurMat_t* dst, AugurMat_t* src) {
 
 /* Viewing */
 
-AugurMat_t augur_mat_view_as(AugurMat_t* src, AugurMat_t* shp) {
+__HOSTDEV__ AugurMat_t augur_mat_view_as(AugurMat_t* src, AugurMat_t* shp) {
   AugurMat_t view;
 
   view.ty = shp->ty;
@@ -193,15 +206,21 @@ AugurMat_t augur_mat_view_as(AugurMat_t* src, AugurMat_t* shp) {
   return view;
 }
 
-AugurVec_t augur_mat_view_as_row_vec(AugurMat_t* mat, uint_t row) {
-  AugurVec_t view;
+__HOSTDEV__ AugurMat_t augur_mat_pll_view_as(AugurVec_t* src, AugurMat_t* shp, uint_t idx) {
+  AugurMat_t* tmp = AUGUR_VEC_GETM(src, idx);
+  return augur_mat_view_as(tmp, shp);
+}
 
+__HOSTDEV__ AugurVec_t augur_mat_view_as_row_vec(AugurMat_t* mat, uint_t row) {
+  /*
+  AugurVec_t view;
   view.ty = mat->ty;
   view.stride = 0; // For row vec??
   view.elems = mat->col;
-  view.data = mat->data + row * mat->col;
-  
+  view.data = mat->data + row * mat->col;  
   return view;
+  */
+  return augur_mat_getv(mat, row);
 }
 
 
@@ -431,7 +450,7 @@ __HOSTDEV__ void augur_mat_ms(double a, AugurMat_t* A) {
  * Input:   A matrix, v vector
  * Output:  A += A v'v
  */
-__HOSTDEV__ void augur_mat_atm_inc_vtmt(AugurMat_t* A, AugurVec_t* v) {
+__HOSTORDEV__ void augur_mat_atm_inc_vtmt(AugurMat_t* A, AugurVec_t* v) {
   for (uint_t i = 0; i < v->elems; i++) {
     for (uint_t j = 0; j < v->elems; j++) {
       double* p = ((double*) A->data) + (i * v->elems + j);
@@ -444,18 +463,28 @@ __HOSTDEV__ void augur_mat_atm_inc_vtmt(AugurMat_t* A, AugurVec_t* v) {
 
 /* Host matrix operations */
 
+#ifndef AUGURCPU
+__global__ void kernel_augur_mat_plus(double* dst_data, double* m1_data, double* m2_data, int len) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < len) {
+    dst_data[idx] = m1_data[idx] + m2_data[idx];
+  }
+}
+#endif
+
 void h_augur_mat_plus(AugurMat_t* dst, AugurMat_t* m1, AugurMat_t* m2) {
   switch (dst->ty) {
   case AUGUR_DBL: {
-#ifdef AUGURCPU
     double* dst_data = (double*) dst->data;
     double* m1_data = (double*) m1->data;
     double* m2_data = (double*) m2->data;
+#ifdef AUGURCPU
     for (uint_t i = 0; i < dst->row * dst->col; i++) {
       dst_data[i] = m1_data[i] + m2_data[i];
     }
 #else
-    // TODO: IMPLEMENT ME
+    uint_t len = dst->row * dst->col;
+    kernel_augur_mat_plus<<<BLKS(len), THRDS>>>(dst_data, m1_data, m2_data, len);
 #endif    
     break;
   }
@@ -511,7 +540,7 @@ void hi_augur_mat_to_native(AugurMemLoc_t loc, AugurMat_t* dst, char** dst_data,
  */
 void h_augur_mat_to_native(AugurMemLoc_t loc, AugurMat_t* dst, AugurMat_t* src, Bool_t f_cpy) {
   uint_t numbytes = ty2size(src->ty) * src->row * src->col;
-  char* dst_data = augur_malloc(numbytes, loc);
+  char* dst_data = (char*) augur_malloc(numbytes, loc);
   hi_augur_mat_to_native(loc, dst, &dst_data, src, f_cpy);
 }
 
@@ -530,7 +559,8 @@ void hi_augur_mat_from_native(AugurMemLoc_t loc, AugurMat_t* dst, char** src_dat
   }
 #ifndef AUGURCPU
   case AUGUR_GPU: {
-    augur_memcpy(dst->data, *src_data, numbytes, AUGUR_D2H);
+    // Assume src_data is on host
+    augur_memcpy(dst->data, *src_data, numbytes, AUGUR_H2H);
     break;
   }
 #endif
@@ -545,8 +575,24 @@ void hi_augur_mat_from_native(AugurMemLoc_t loc, AugurMat_t* dst, char** src_dat
  * src_data: at loc
  */
 void h_augur_mat_from_native(AugurMemLoc_t loc, AugurMat_t* dst, AugurMat_t* src) {
-  char* src_data = (char*) src->data;
-  hi_augur_mat_from_native(loc, dst, &src_data);
+  switch (loc) {
+  case AUGUR_CPU: {
+    char* src_data = (char*) src->data;
+    hi_augur_mat_from_native(loc, dst, &src_data);
+    break;
+  }
+#ifndef AUGURCPU
+  case AUGUR_GPU: {
+    uint_t numbytes = ty2size(dst->ty) * dst->row * dst->col;
+    char* src_data = (char*) augur_malloc(numbytes, AUGUR_CPU);
+    augur_memcpy(src_data, src->data, numbytes, AUGUR_D2H);
+    char* cpy = src_data;
+    hi_augur_mat_from_native(loc, dst, &src_data);
+    free(cpy);
+    break;
+  }
+#endif
+  }
 }
 
 
@@ -595,38 +641,3 @@ void h_augur_mat_basis_add(AugurMemLoc_t loc, AugurMat_t* mat, int idx, double v
   }
   }
 }
-
-
-
-/*
-AugurMat_t h_augur_mat_stk_alloc(AugurMemLoc_t loc, AugurTyp_t ty, uint_t row, uint_t col) {
-  AugurMat_t mat;
-  mat.ty = ty;
-  mat.row = row;
-  mat.col = col;
-  mat.data = augur_malloc(ty2size(ty) * row * col, loc);
-  return mat;
-}
-
-AugurMat_t h_augur_mat_stk_alloc2(AugurMemLoc_t loc, AugurTyp_t ty, uint_t row, uint_t col, void* h_data) {
-  AugurMat_t mat = h_augur_mat_stk_alloc(loc, ty, row, col);
-  uint_t numbytes = ty2size(ty) * row * col;
-  switch (loc) {
-  case AUGUR_CPU: {
-    augur_memcpy(mat.data, h_data, numbytes, AUGUR_H2H);
-    break;
-  }
-#ifndef AUGURCPU
-  case AUGUR_GPU: {
-    augur_memcpy(mat.data, h_data, numbytes, AUGUR_H2D);
-    break;
-  }
-#endif
-  }
-  return mat;
-}
-
-void h_augur_mat_stk_free(AugurMemLoc_t loc, AugurMat_t* mat) {
-  augur_free(mat->data, loc);
-}
-*/

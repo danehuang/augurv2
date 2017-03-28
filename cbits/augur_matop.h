@@ -65,8 +65,9 @@ void h_augur_mat_cpy_data(AugurMemLoc_t loc, AugurMat_t* dst, AugurMat_t* src);
 
 /* Viewing */
 
-AugurMat_t augur_mat_view_as(AugurMat_t* src, AugurMat_t* shp);
-AugurVec_t augur_mat_view_as_row_vec(AugurMat_t* mat, uint_t row);
+__HOSTDEV__ AugurMat_t augur_mat_view_as(AugurMat_t* src, AugurMat_t* shp);
+__HOSTDEV__ AugurMat_t augur_mat_pll_view_as(AugurVec_t* src, AugurMat_t* shp, uint_t idx);
+__HOSTDEV__ AugurVec_t augur_mat_view_as_row_vec(AugurMat_t* mat, uint_t row);
 
 
 /* Printing */
@@ -90,7 +91,7 @@ __HOSTDEV__ void augur_mat_mvm(AugurVec_t* dst, AugurMat_t* A, AugurVec_t* v);
 __HOSTDEV__ void augur_mat_vmm(AugurVec_t* dst, AugurVec_t* v, AugurMat_t* A);
 __HOSTDEV__ void augur_mat_ms(double a, AugurMat_t* A);
 
-__HOSTDEV__ void augur_mat_atm_inc_vtmt(AugurMat_t* mat, AugurVec_t* vec);
+__HOSTORDEV__ void augur_mat_atm_inc_vtmt(AugurMat_t* mat, AugurVec_t* vec);
 
 /* Host matrix operations */
 

@@ -202,7 +202,7 @@ __HOSTDEV__ real_t augur_chisquared_dotpt(real_t pt, int df) {
   return 0.0;
 }
 
-__HOSTDEV__ real_t augur_chisquared_sample(augur_rng* rng, int df) {
+__HOSTORDEV__ real_t augur_chisquared_sample(augur_rng* rng, int df) {
   real_t chi = 0.0;
   for (int i = 0; i < df; i++) {
     double tmp = augur_std_normal_sample(rng);
@@ -754,33 +754,34 @@ real_t h_augur_uniform_sample(gsl_rng* rng, real_t lower, real_t upper) {
   return lower + u * (upper - lower);
 }
 
-#ifndef AUGURCPU
-__global__ void hRandNormVecKernel(augur_rng *rng, AugurBlk_t b) {
+#ifdef AUGURCPU
+void hi_augur_arr_randn(augur_rng *rng, real_t* arr, uint_t elems) {
+  for (uint_t i = 0; i < elems; i++) {
+    arr[i] = gsl_ran_gaussian_ziggurat(rng, 1.0);
+  }
+}
+#else
+__global__ void kernel_augur_arr_randn(augur_rng *rng, real_t* arr, uint_t elems) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = b.dataLen;
-  if (idx < size) {
-    ((double*) b.base_data)[idx] = augur_std_normal_sample(rng + idx);
-    return;
+  if (idx < elems) {
+    arr[idx] = curand_normal_double(rng);
   }
 }
 #endif
-
-void hi_augur_arrd_randn(augur_rng *rng, double* arr, uint_t elems) {
-  for (uint_t i = 0; i < elems; i++) {
-    arr[i] = augur_std_normal_sample(rng);
-  }
-}
 
 void h_augur_blk_randn(augur_rng *rng, AugurBlk_t* blk) {
 #ifdef AUGURCPU
   for (uint_t i = 0; i < blk->num_blks; i++) {
     uint_t elems = h_augur_blk_obj2elems(blk->typs[i], blk->blks[i]);
     void* data = h_augur_blk_obj_get_data(blk->typs[i], blk->blks[i]);
-    hi_augur_arrd_randn(rng, (double*) data, elems);
+    hi_augur_arr_randn(rng, (real_t*) data, elems);
   }
 #else
-  // TODO: IMPLEMENT ME
-  // hRandNormVecKernel<<<BLKS(b->num_blks), THRDS >>>(rng, *b);
+  for (uint_t i = 0; i < blk->num_blks; i++) {
+    uint_t elems = h_augur_blk_obj2elems(blk->typs[i], blk->blks[i]);
+    void* data = h_augur_blk_obj_get_data(blk->typs[i], blk->blks[i]);
+    kernel_augur_arr_randn<<<BLKS(elems), THRDS>>>(rng, (real_t*) data, elems);
+  }
 #endif
 }
 

@@ -50,7 +50,7 @@ void h_augur_blk_dump(AugurMemLoc_t loc, AugurBlk_t* blk);
 /* Block operations */
 
 void h_augur_blk_zero(AugurMemLoc_t loc, AugurBlk_t* blk);
-void h_augur_blk_scale(AugurMemLoc_t loc, double a, AugurBlk_t* blk);
+void h_augur_blk_scale(AugurMemLoc_t loc, real_t a, AugurBlk_t* blk);
 void h_augur_blk_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, AugurBlk_t* b2);
 void h_augur_blk_minus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, AugurBlk_t* b2);
 void h_augur_blk_scale_plus(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* b1, real_t scale, AugurBlk_t* b2);

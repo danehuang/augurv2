@@ -74,7 +74,7 @@ ty_AugurShape = C.NameTy "AugurShape_t"
 
 enum_AUGUR_CPU :: String
 enum_AUGUR_CPU = "AUGUR_CPU"
-
+                 
 exp_AUGUR_CPU :: C.Exp (TVar C.Typ)
 exp_AUGUR_CPU = C.mkLiterally enum_AUGUR_CPU
 
@@ -87,14 +87,19 @@ exp_AUGUR_GPU = C.mkLiterally enum_AUGUR_GPU
 targetToExp :: Target -> C.Exp (TVar C.Typ)
 targetToExp CPU = exp_AUGUR_CPU
 targetToExp (GPU _) = exp_AUGUR_GPU
-targetToExp Device = exp_AUGUR_GPU
                 
 enum_AUGUR_INT :: String
 enum_AUGUR_INT = "AUGUR_INT"
 
+exp_AUGUR_INT :: C.Exp (TVar C.Typ)
+exp_AUGUR_INT = C.mkLiterally enum_AUGUR_INT
+                 
 enum_AUGUR_DBL :: String
 enum_AUGUR_DBL = "AUGUR_DBL"
 
+exp_AUGUR_DBL :: C.Exp (TVar C.Typ)
+exp_AUGUR_DBL = C.mkLiterally enum_AUGUR_DBL
+                 
 enum_AUGUR_VEC :: String
 enum_AUGUR_VEC = "AUGUR_VEC"
 
@@ -110,7 +115,7 @@ enum_TRUE = "TRUE"
 exp_TRUE :: C.Exp (TVar C.Typ)
 exp_TRUE = C.mkLiterally enum_TRUE
 
-
+          
 ty2AugurTy :: Typ -> String
 ty2AugurTy IntTy = enum_AUGUR_INT
 ty2AugurTy RealTy = enum_AUGUR_DBL
@@ -118,7 +123,8 @@ ty2AugurTy (VecTy _) = enum_AUGUR_VEC
 ty2AugurTy (MatTy _) = enum_AUGUR_MAT
 ty2AugurTy (BlkTy _) = enum_AUGUR_BLK
 ty2AugurTy _ = error $ "[CodeGenC] @ty2AugurTy | Shouldn't happen"
-           
+
+               
 -----------------------------------
 -- == Common expressions 
 
@@ -138,7 +144,28 @@ projMCMC :: String -> C.Exp (TVar C.Typ)
 projMCMC = C.strctProj' exp_MCMC
 
            
-           
+-----------------------------------
+-- == Cuda expressions
+
+exp_BLOCKIDX :: C.Exp (TVar C.Typ)
+exp_BLOCKIDX = C.mkLiterally "blockIdx"
+
+exp_BLOCKIDX_X :: C.Exp (TVar C.Typ)
+exp_BLOCKIDX_X = C.Binop exp_BLOCKIDX C.Proj (C.mkLiterally "x")
+               
+exp_BLOCKDIM :: C.Exp (TVar C.Typ)
+exp_BLOCKDIM = C.mkLiterally "blockDim"
+
+exp_BLOCKDIM_X :: C.Exp (TVar C.Typ)
+exp_BLOCKDIM_X = C.Binop exp_BLOCKDIM C.Proj (C.mkLiterally "x")
+               
+exp_THREADIDX :: C.Exp (TVar C.Typ)
+exp_THREADIDX = C.mkLiterally "threadIdx"
+
+exp_THREADIDX_X :: C.Exp (TVar C.Typ)
+exp_THREADIDX_X = C.Binop exp_THREADIDX C.Proj (C.mkLiterally "x")
+                
+               
 -----------------------------------
 -- == Library functions
 
@@ -155,6 +182,7 @@ emitPrim Expit = "augur_expit"
 emitPrim Logit = "augur_logit"
 emitPrim MinusVec = "augur_vec_minus"
 emitPrim SizeVec = "AUGUR_VEC_ELEMS"
+emitPrim NormVec = "augur_vec_norm"
 emitPrim DotProd = "augur_dotprod"
 emitPrim AllocVecFromShape = "allocVecFromShape"
 emitPrim ReadVecFromShape = "readVecFromShape"

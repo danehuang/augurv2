@@ -177,9 +177,9 @@ runDiscFn cinfo copt inferCtx v_mod fn =
        (v, _, _) <- runRWST (discFn v_mod fn' (prodFn fns')) discRdr discSt
        samp <- runLint copt v (Lint.runLintDecl cinfo False inferCtx)
        let like' = samp -- TODO: HACK? but never used
-           samp' = LX.LowPP (LX.LowXX Map.empty False samp)
+           samp' = LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) [] samp)
            kind = K.Gibbs (K.Disc samp')
-           like'' = LX.LowPP (LX.LowXX Map.empty False like') -- TODO: hack, but never used
+           like'' = error $ "[Core.CgDisc] | Shouldn't dereference" -- LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) like') -- TODO: hack, but never used
            kern = K.Base kind (K.Single v_mod) fn [] [] like''
        return $ kern
        

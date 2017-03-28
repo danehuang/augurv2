@@ -74,7 +74,7 @@ __HOSTORDEV__ real_t augur_beta_geometric_conj(augur_rng* rng, int sum, int N, r
 __HOSTDEV__ real_t augur_chisquared_pdf(real_t pt, int df);
 __HOSTDEV__ real_t augur_chisquared_ll(real_t pt, int df);
 __HOSTDEV__ real_t augur_chisquared_dotpt(real_t pt, int df);
-__HOSTDEV__ real_t augur_chisquared_sample(augur_rng* rng, int df);
+__HOSTORDEV__ real_t augur_chisquared_sample(augur_rng* rng, int df);
   
 
 /* Exponential */

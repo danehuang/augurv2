@@ -59,6 +59,7 @@ data Prim = Neg
             
           -- Internal
           | SizeVec              -- ^ size of vector
+          | NormVec              -- ^ normalized vector
           | AllocVecFromShape    -- ^ allocate vector 
           | ReadVecFromShape     -- ^ copy vector's shape
           | AllocMatFromShape    -- ^ allocate matrix 
@@ -93,6 +94,7 @@ instance Pretty Prim where
     ppr LAnd = text "&&"
     ppr MinusVec = text "minusVec"
     ppr SizeVec = text "sizeVec"
+    ppr NormVec = text "normVec"
     ppr AllocVecFromShape = text "allocVec"
     ppr ReadVecFromShape = text "cpyVecShp"
     ppr AllocMatFromShape = text "allocMat"
@@ -174,6 +176,7 @@ getPrimTyFn pm prim =
       MinusVec -> vecOverload2
       SizeVec -> [ ArrTy [VecTy IntTy] IntTy
                  , ArrTy [VecTy RealTy] IntTy ]
+      NormVec -> [ ArrTy [VecTy RealTy] (VecTy RealTy) ]
       DotProd -> getDotProdTyFn DM_Fn pm
       AllocVecFromShape ->
           [ ArrTy [VecTy IntTy] (VecTy IntTy)
@@ -203,6 +206,7 @@ getPrimTy' dm pm prim =
       DM_Mem ->
           case prim of
             MinusVec -> vecOverload2Mem
+            NormVec -> [ ArrTy [VecTy RealTy] UnitTy ]
             DotProd -> getDotProdTyFn dm pm
             AllocVecFromShape ->
                 [ ArrTy [VecTy IntTy, VecTy IntTy] (VecTy IntTy)

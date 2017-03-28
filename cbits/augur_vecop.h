@@ -26,8 +26,13 @@
 #define AUGUR_SETI(dst, i)        ({*(dst) = i;})
 #define AUGUR_SETD(dst, d)        ({*(dst) = d;})
 
+#ifdef AUGURCPU
 #define AUGUR_ATMINCI(dst, i)     ({*(dst) = *(dst) + (i);})
 #define AUGUR_ATMINCD(dst, d)     ({*(dst) = *(dst) + (d);})
+#else
+#define AUGUR_ATMINCI(dst, i)     ({atomicAdd(dst, i);})
+#define AUGUR_ATMINCD(dst, d)     ({atomicAdd(dst, d);})
+#endif
 
 #define AUGUR_INCI(dst, i)        ({*(dst) = *(dst) + (i);})
 #define AUGUR_INCD(dst, d)        ({*(dst) = *(dst) + (d);})
@@ -80,6 +85,7 @@ uint_t h_augur_vec_maxdim(AugurVec_t* vec, uint_t dim);
 
 /* Allocation */
 
+AugurVec_t h_augur_idx_setup(AugurMemLoc_t loc, uint_t elems);
 void h_augur_vec_host_base_alloc(AugurVec_t* vec, void* data, AugurTyp_t ty, uint_t elems);
 void h_augur_vec_host_alloc(AugurVec_t* vec, AugurTyp_t ty, uint_t elems, AugurAllocMode_t mode);
 void h_augur_vec_host_cpy(AugurVec_t* dst, AugurVec_t* src, AugurTyp_t base_ty, AugurAllocMode_t mode);
@@ -103,8 +109,9 @@ void h_augur_flat_vec_cpy_data(AugurMemLoc_t loc, AugurFlatVec_t* dst, AugurFlat
 
 /* Views */
 
-AugurVec_t augur_vec_view_as(AugurVec_t* src, AugurVec_t* shp);
-AugurVec_t augur_arr_view_as_vec(AugurTyp_t ty, void* data, uint_t elems);
+__HOSTDEV__ AugurVec_t augur_vec_view_as(AugurVec_t* src, AugurVec_t* shp);
+__HOSTDEV__ AugurVec_t augur_vec_pll_view_as(AugurVec_t* src, AugurVec_t* shp, uint_t idx);
+__HOSTDEV__ AugurVec_t augur_arr_view_as_vec(AugurTyp_t ty, void* data, uint_t elems);
 
 
 /* Printing */

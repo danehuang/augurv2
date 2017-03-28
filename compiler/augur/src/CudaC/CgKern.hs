@@ -97,7 +97,7 @@ genReset :: C.Exp TIdCTy -> C.Exp TIdCTy -> TIdTy -> Bool -> C.Stmt TIdCTy
 genReset e_loc e_aux vCi reset =
     if reset
     then C.Exp (genReset' e_loc e_aux vCi)
-    else C.Exp (C.Lit $ C.Int 0)
+    else C.Exp (C.mkInt 0)
 
          
 cgReset :: C.Exp TIdCTy -> C.Exp TIdCTy -> [(TIdTy, AllocKind)] -> [C.Stmt TIdCTy]
@@ -130,7 +130,7 @@ cgGradProp allocs kernParams pk =
           do (e_curr, e_prop, e_aux) <- askMcmcRepr
              let e_simLen = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 0)))
                  e_stepSize = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 1)))
-             return $ C.Exp (C.LibCall (declName' prop) [ e_aux, e_curr, e_prop, e_simLen, e_stepSize ])
+             return $ C.mkLibCall (declName' prop) [ e_aux, e_curr, e_prop, e_simLen, e_stepSize ]
       Reflect _ -> error $ "[CgKern] @cgGradProp | TODO"                   
 
 cgGibbs :: [(TIdTy, AllocKind)] -> GibbsKind (Decl TIdTy) -> TyId -> C.Exp (TVar C.Typ) -> CgM (C.Stmt TIdCTy)

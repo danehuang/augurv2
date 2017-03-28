@@ -51,7 +51,8 @@ data Core b =
 data InferCtx b =
     IC { ic_modBlkCtx :: ModBlkCtx b
        , ic_dupCtx :: ModParamDupCtx b
-       , ic_modDecls :: ModDecls b }
+       , ic_modDecls :: ModDecls b
+       , getIdxVar :: b }
     
 type ModBlkCtx b = Map.Map b [b]
     

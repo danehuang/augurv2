@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+
+# Taken from: https://github.com/nh2/call-haskell-from-anything
+
+# Pass all arguments that cabal passes us to the python script.
+python detect-ghc-buildinfo.py $@

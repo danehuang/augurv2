@@ -88,3 +88,6 @@ rendSepBy s docs = render (sepBy s docs)
 
 pprShowLs :: (Pretty a) => [a] -> String
 pprShowLs = rendSepBy commasp
+
+pprShowLs' :: (Pretty a) => [a] -> String
+pprShowLs' xs = render (vcat (map ppr xs))

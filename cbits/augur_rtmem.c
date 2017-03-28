@@ -29,7 +29,7 @@ AugurShape_t h_augur_shape_stk_alloc(AugurDim_t* dims, uint_t len, AugurTyp_t ty
   shape.base_ty = ty;
   shape.len = len;
   uint_t numbytes = sizeof(AugurDim_t) * len;
-  shape.dims = augur_malloc(numbytes, AUGUR_CPU);
+  shape.dims = (AugurDim_t*) augur_malloc(numbytes, AUGUR_CPU);
   augur_memcpy(shape.dims, dims, numbytes, AUGUR_H2H);
   return shape;
 }
@@ -56,7 +56,7 @@ void h_augur_dim_dump(AugurDim_t* dim) {
     }
     default: {
       // TODO: ERROR
-      val = -1;
+      val = 0;
       break;
     }
     }
@@ -104,6 +104,10 @@ AugurTyp_t hi_augur_dim_to_typ(AugurDim_t* dim) {
   case DIM_CPY: {
     return dim->cpyty;
   }
+  default: {
+    // TODO: ERROR
+    return AUGUR_VEC;
+  }
   }
 }
 
@@ -144,6 +148,10 @@ uint_t hi_augur_dim_to_elems(AugurDim_t* dim) {
       return 0;
     }
     }
+  }
+  default: {
+    // TODO: ERROR
+    return 0;
   }
   }
 }
