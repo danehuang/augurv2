@@ -676,6 +676,25 @@ __HOSTDEV__ void augur_vec_div(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2) 
   }
 }
 
+__HOSTDEV__ void augur_vec_norm(AugurVec_t* vec) {
+  switch (vec->ty) {
+  case AUGUR_DBL: {
+    real_t acc = 0.0;
+    for (uint_t i = 0; i < vec->elems; i++) {
+      acc += AUGUR_VEC_GETD(vec, i);
+    }
+    for (uint_t i = 0; i < vec->elems; i++) {
+      AUGUR_VEC_SETD(vec, i, (AUGUR_VEC_GETD(vec, i) / acc));
+    }
+    break;
+  }
+  default: {
+    // TODO: ERROR
+    break;
+  }
+  }
+}
+
 __HOSTORDEV__ void augur_vec_atm_plus(AugurVec_t* dst, AugurVec_t* vec) {
   double* p_data = (double*) dst->data;
   for (uint_t i = 0; i < dst->elems; i++) {
@@ -711,6 +730,18 @@ __HOSTDEV__ void augur_vec_cpy(AugurVec_t* dst, AugurVec_t* src) {
   }
   }
 }
+
+#ifndef AUGURCPU
+__device__ void augur_pll_sum_vec(AugurVec_t* dst, AugurVec_t* src) {
+  for (uint_t i = 0; i < src->elems; i++) {
+    AugurVec_t* src_p = AUGUR_VEC_GETV(src, i);
+    double* start = (double*) src_p->data;
+    double* end = (double*) src_p->data + src_p->elems;
+    double tmp = thrust::reduce(thrust::device, start, end);
+    AUGUR_VEC_SETD(dst, i, tmp);
+  }
+}
+#endif
 
 
 /* Host vector operations */

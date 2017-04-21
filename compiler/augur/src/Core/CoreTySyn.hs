@@ -257,7 +257,7 @@ projBaseTy t ls
         case t of
           VecTy t' -> projBaseTy t' (tail ls)
           MatTy t' -> projBaseTy (VecTy t') (tail ls)
-          _ -> error $ "Shouldn' happen"
+          _ -> error $ "Shouldn't happen"
     | otherwise = t
 
 

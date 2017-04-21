@@ -87,7 +87,8 @@ instance (Pretty b) => Pretty (ConstExp b) where
              
 -----------------------------------
 -- == Operations on syntax
-          
+
+
 mkScalar :: Shp b
 mkScalar = Scalar
 
@@ -116,6 +117,7 @@ tyToDims' x ty idx =
           [ MaxDim x idx, MaxDim x (idx + 1) ]
       t -> error $ "@tyToDims' | Cannot infer size of type " ++ pprShow t
 
+           
 cpyToShp :: (TypedVar b Typ) => b -> Shp b
 cpyToShp x = go (getType' x) 0
     where
@@ -202,5 +204,14 @@ lenShp (BlkOf vs) = error $ "[LowSzSyn] @lenShp | Should not call with " ++ pprS
 isBlk :: Shp b -> Bool
 isBlk (BlkOf _) = True
 isBlk _ = False
-                    
+
+
+insertShpExpEnd :: ShpExp b -> Shp b -> Shp b
+insertShpExpEnd shpExp shp =
+    case shp of
+      Scalar -> Scalar
+      SingConn e Scalar -> SingConn e (SingConn shpExp Scalar)
+      SingConn e shp' -> SingConn e (insertShpExpEnd shpExp shp')
+      MatConn e1 e2 shp' -> MatConn e1 e2 (insertShpExpEnd shpExp shp')
+      BlkOf vs -> error $ "Shouldn't happen"
 

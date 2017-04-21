@@ -82,7 +82,7 @@ hs_compile sModel target sInfer userMode sSizes =
        case v of
          Left errMsg -> newCString $ "ERROR" ++ sep ++ errMsg
          Right (model, kern, sizes, target) ->
-             runComp (C.compile model kern target) >>= \case
+             runComp (C.compile model kern sizes target) >>= \case
                Left errMsg ->
                    newCString $ "ERROR" ++ sep ++ errMsg
                Right (pyModParam, pyTys, inferHdr, inferCode) ->

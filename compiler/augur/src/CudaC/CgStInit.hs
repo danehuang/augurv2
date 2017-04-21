@@ -104,23 +104,28 @@ cgConstExp (S.Var x) = C.Var (cgId x)
 cgConstExp (S.Int i) = C.mkInt i
 
 
-cgShpId :: TVar Typ -> C.Exp (TVar C.Typ)
-cgShpId x =
+cgShpId :: TVar C.Typ -> TVar Typ -> C.Exp (TVar C.Typ)
+cgShpId v_aux x =
     case getType' x of
-      IntTy -> C.Var (cgId x)
-      RealTy -> C.Var (cgId x)
-      VecTy _ -> C.addrOf (C.Var (cgId x))
-      MatTy _ -> C.addrOf (C.Var (cgId x))
+      IntTy -> guardAux
+      RealTy -> guardAux
+      VecTy _ -> C.addrOf (guardAux)
+      MatTy _ -> C.addrOf (guardAux)
       ty -> error $ "Shouldn't happen " ++ pprShow ty
+    where
+      guardAux =
+          if isModAux (idKind x) 
+          then C.derefStrct v_aux (cgId x)
+          else C.Var (cgId x)
 
         
-cgShpExpLit' :: TVar C.Typ -> S.ShpExp (TVar Typ) -> C.Stmt (TVar C.Typ)
-cgShpExpLit' v shp =
+cgShpExpLit' :: TVar C.Typ -> TVar C.Typ -> S.ShpExp (TVar Typ) -> C.Stmt (TVar C.Typ)
+cgShpExpLit' v_aux v shp =
     case shp of
       S.Cpy x ->
           let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_CPY") ]))
               s2 = C.assignStmt' (e_strct "cpyty") (C.mkLiterally (ty2AugurTy (getType' x)))
-              s3 = C.assignStmt' (e_strct "cpyof") (cgShpId x)
+              s3 = C.assignStmt' (e_strct "cpyof") (cgShpId v_aux x)
           in
             C.seqStmt [ s1, s2, s3 ]
       S.Val e ->
@@ -131,7 +136,7 @@ cgShpExpLit' v shp =
       S.MaxDim x axis ->
           let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_MAX") ]))
               s2 = C.assignStmt' (e_strct "objty") (C.mkLiterally enum_AUGUR_VEC)
-              s3 = C.assignStmt' (e_strct "obj") (cgShpId x)
+              s3 = C.assignStmt' (e_strct "obj") (cgShpId v_aux x)
               s4 = C.assignStmt' (e_strct "dim") (C.mkInt axis)
           in
             C.seqStmt [ s1, s2, s3, s4 ]
@@ -144,7 +149,8 @@ cgShpLit' S.Scalar = return []
 cgShpLit' (S.SingConn e shp') = 
     do v <- freshId Anon Local ty_AugurDim
        rest <- cgShpLit' shp'
-       return $ (v, cgShpExpLit' v e) : rest
+       v_aux <- asks cr_vAux
+       return $ (v, cgShpExpLit' v_aux v e) : rest
 cgShpLit' (S.MatConn row col shp') =
     do v <- freshId Anon Local ty_AugurDim
        let s1 = C.assignStmt v (C.Lit (C.Strct [ ("kind", C.mkLiterally "DIM_MAT") ]))
@@ -343,10 +349,11 @@ cgCpyBlk :: C.Exp (TVar C.Typ) -> TVar C.Typ -> TVar Typ -> [TVar Typ] -> CgM (C
 cgCpyBlk loc v_strct v vs =
     do v_typs <- freshId Anon Local ty_AugurTyp
        v_blks <- freshId Anon Local (C.PtrTy C.VoidTy)
+       v_aux <- asks cr_vAux
        let numblks = length vs
            e_typs = cgTypArr vs
            s_typs = C.Declare (C.ConstArr v_typs numblks) (Just e_typs)
-           e_blks = C.Lit (C.Array (map (cgShpId) vs))
+           e_blks = C.Lit (C.Array (map (cgShpId v_aux) vs))
            s_blks = C.Declare (C.ConstArr v_blks numblks) (Just e_blks)
            e_args = [ loc
                     , cgExpXfer v dst

@@ -17,8 +17,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Low.InlineLow 
-    ( runInlineStmt
-    , runInlineDecl) where
+    ( runInlineDecl ) where
 
 import Control.Monad.Except
 import Control.Monad.RWS
@@ -34,6 +33,7 @@ import Core.CoreTySyn
 import Comm.DistSyn
 import Comm.Prim
 import qualified Low.LintLow as Lint
+import Low.ProjLow
 
 ----------------------------------------------------------------------
 -- = InlineLow Description
@@ -82,7 +82,7 @@ inlineDirichlet dop dm es =
       Conj _ _ -> 
           do x <- freshId Anon Local IntTy
              y <- freshId Anon Local (tyOf (es !! 0))
-             let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 2 ])
+             let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 1 ])
                  e1 = Proj (es !! 0) [ Var x ]
                  e2 = Proj (es !! 1) [ Var x ]
                  e_samp = DistOp Sample dm Gamma [ e1 + e2, Lit (Real 1.0) ]
@@ -90,7 +90,7 @@ inlineDirichlet dop dm es =
                  s_store = Store y [ Var x ] Update e_samp
                  s_samp = Loop Parallel x gen (seqStmt [ s_ass, s_store ])
                  e_norm = Call (PrimId DM_Mem PM_Fn NormVec) [ es !! 0 ]
-                 s_norm = Loop Parallel x gen (Exp e_norm)
+                 s_norm = (Exp e_norm)
              emitStmt (seqStmt [ s_samp, s_norm ])
              return $ Lit (Int 0)
       _ -> return $ DistOp dop dm Dirichlet es
@@ -103,6 +103,49 @@ inlineDist dop dm dist es =
       _ -> return $ DistOp dop dm dist es
 
 
+inlineDotProd :: (TypedVar b Typ) => PrimMode -> [Exp b] -> InlineM b (Exp b)
+inlineDotProd pm es =
+    case pm of
+      PM_Fn -> 
+          do idx <- freshId Anon Local IntTy
+             acc <- freshId Anon Local RealTy
+             let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 0 ])
+                 e_vec1 = Proj (es !! 0) [ Var idx ]
+                 e_vec2 = Proj (es !! 1) [ Var idx ]
+                 s_ass = seqStmt [ Assign acc (Lit (Real 0))
+                                 , Loop Sequential idx gen (Store acc [] Inc (e_vec1 * e_vec2)) ]
+             emitStmt s_ass
+             return $ Var acc
+      PM_Grad 0 ->
+          do idx <- freshId Anon Local IntTy
+             v_dst <- freshId Anon Local (VecTy RealTy)
+             let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 0 ])
+                 e_adj = es !! 1
+                 e_vec2 = Proj (es !! 3) [ Var idx ]
+                 s_ass = seqStmt [ Assign v_dst (es !! 0)
+                                 , Loop Parallel idx gen (Store v_dst [ Var idx ] Update (e_adj * e_vec2)) ]
+             emitStmt s_ass
+             return $ Lit (Int 0)
+      PM_Grad 1 -> 
+          do idx <- freshId Anon Local IntTy
+             v_dst <- freshId Anon Local (VecTy RealTy)
+             let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 0 ])
+                 e_adj = es !! 1
+                 e_vec1 = Proj (es !! 2) [ Var idx ]
+                 s_ass = seqStmt [ Assign v_dst (es !! 0)
+                                 , Loop Parallel idx gen (Store v_dst [ Var idx ] Update (e_adj * e_vec1)) ]
+             emitStmt s_ass
+             return $ Lit (Int 0)
+      _ -> error $ "[Low.InlineLow] @inlineDotProd | Shouldn't happen"
+
+
+inlinePrim :: (TypedVar b Typ) => DopMode -> PrimMode -> Prim -> [Exp b] -> InlineM b (Exp b)
+inlinePrim dop pm prim es = 
+    case prim of
+      DotProd -> inlineDotProd pm es
+      _ -> return $ Call (PrimId dop pm prim) es
+
+
 inlineExp :: (TypedVar b Typ) => Exp b -> InlineM b (Exp b)
 inlineExp (Var x) = return $ Var x
 inlineExp (Lit lit) = return $ Lit lit
@@ -110,7 +153,7 @@ inlineExp (DistOp dop dm dist es) = inlineDist dop dm dist es
 inlineExp (Call ce es) = 
     case ce of
       FnId _ -> error $ "[Low.InlineLow] | TODO"
-      PrimId dop pm prim -> return $ Call (PrimId dop pm prim) es
+      PrimId dop pm prim -> inlinePrim dop pm prim es
 inlineExp (Proj e es) = return $ Proj e es
 
 
@@ -121,7 +164,10 @@ inlineStmt (Exp e) =
        e' <- inlineExp e
        s_inline <- get >>= return . seqStmt
        put saved
-       return $ seqStmt [ s_inline, Exp e' ]
+       let s = case e' of
+                 Lit (Int 0) -> Skip
+                 _ -> Exp e'
+       return $ seqStmt [ s_inline, s ]
 inlineStmt (Assign x e) = 
     do saved <- get
        e' <- inlineExp e
@@ -159,14 +205,17 @@ inlineDecl (Fun name params allocs body retExp retTy) =
 -----------------------------------
 -- == Top-level
 
-runInlineStmt :: (TypedVar b Typ) => GenSym -> Stmt b -> CompM (Stmt b)
-runInlineStmt genSym stmt =
-    do (v, _, _) <- runRWST (inlineStmt stmt) (IR genSym) []
-       return v      
-
+{-
+runInlineStmt :: (TypedVar b Typ) => CompInfo -> Stmt b -> CompM (Stmt b)
+runInlineStmt cinfo s =
+    do (s', _, _) <- runRWST (inlineStmt s) (IR (getGenSym cinfo)) []
+       s'' <- runProjStmt cinfo s'
+       return s''
+-}
 
 runInlineDecl :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> Decl b -> CompM (Decl b)
 runInlineDecl cinfo copt inferCtx decl =
     do let genSym = getGenSym cinfo
-       (v, _, _) <- runRWST (inlineDecl decl) (IR genSym) []
-       runLint copt v (Lint.runLintDecl cinfo False inferCtx)
+       (decl', _, _) <- runRWST (inlineDecl decl) (IR genSym) []
+       decl'' <- runProjDecl cinfo copt inferCtx decl'
+       runLint copt decl'' (Lint.runLintDecl cinfo False inferCtx)

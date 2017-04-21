@@ -87,6 +87,7 @@ __HOSTDEV__ real_t augur_dotpt_logit(real_t x);
 
 __HOSTDEV__ real_t augur_dotprod(AugurVec_t* v1, AugurVec_t* v2);
 __HOSTDEV__ void augur_dotprod_grad_0(AugurVec_t* dst, real_t adj, AugurVec_t* v1, AugurVec_t* v2);
+__HOSTDEV__ void augur_dotprod_grad_1(AugurVec_t* dst, real_t adj, AugurVec_t* v1, AugurVec_t* v2);
 
 // __HOSTDEV__ void augur_vec_logit(AugurVec_t* dst, AugurVec_t* src);
 

@@ -440,9 +440,21 @@ lowerStmt (Store x es uk eval) =
                         Pdf -> return $ Store x es' uk eval'
                         _ -> return $ Exp eval'
                   else return $ Store x es' uk eval'
-              Call (PrimId _ pm prim) _ ->
+              Call (PrimId _ pm prim) args ->
                   case (prim, pm) of
-                    (P.DotProd, PM_Grad _) -> return $ Exp eval'
+                    (P.DotProd, PM_Grad _) ->
+                        case uk of
+                          Inc ->
+                              do y <- freshId Anon Local (VecTy RealTy)
+                                 return $ seqStmt [ Exp eval'
+                                                  , Assign y (args !! 0)
+                                                  , Store x es' uk (Var y) ]
+                          AtmInc ->
+                              do y <- freshId Anon Local (VecTy RealTy)
+                                 return $ seqStmt [ Exp eval'
+                                                  , Assign y (args !! 0)
+                                                  , Store x es' uk (Var y) ]
+                          _ -> return $ Exp eval'
                     _ -> return $ Store x es' uk eval'
               _ -> return $ Store x es' uk eval'
        return $ seqStmt (reverse (s : stmts))

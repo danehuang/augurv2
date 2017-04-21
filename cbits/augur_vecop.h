@@ -127,10 +127,16 @@ __HOSTDEV__ void augur_vec_scale(double a, AugurVec_t* v);
 __HOSTDEV__ void augur_vec_plus(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2);
 __HOSTDEV__ void augur_vec_minus(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2);
 __HOSTDEV__ void augur_vec_times(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2);
-// __HOSTDEV__ void augur_vec_div(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2);
+__HOSTDEV__ void augur_vec_div(AugurVec_t* dst, AugurVec_t* v1, AugurVec_t* v2);
+__HOSTDEV__ void augur_vec_norm(AugurVec_t* vec);
 
 __HOSTORDEV__ void augur_vec_atm_plus(AugurVec_t* dst, AugurVec_t* vec);
 __HOSTDEV__ void augur_vec_cpy(AugurVec_t* dst, AugurVec_t* src);
+
+
+#ifndef AUGURCPU
+__device__ void augur_pll_sum_vec(AugurVec_t* dst, AugurVec_t* src);
+#endif
 
 /* Host vector operations */
 

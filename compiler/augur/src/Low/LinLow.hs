@@ -15,7 +15,8 @@
  -}
 
 module Low.LinLow
-    ( runLinDecl
+    ( runLinStmt
+    , runLinDecl
     , runLinDecl'
     ) where
 
@@ -181,6 +182,11 @@ linDecl (Fun name params alloc body retExp retTy) =
                        
 -----------------------------------
 -- == Top-level
+
+runLinStmt :: (TypedVar b t) => GenSym -> Bool -> Stmt b -> CompM (Stmt b)
+runLinStmt genSym linProj s =
+    runReaderT (linStmt s) (LR linProj genSym)
+
 
 runLinDecl :: (TypedVar b t) => GenSym -> Bool -> Decl b -> CompM (Decl b)
 runLinDecl genSym linProj decl =

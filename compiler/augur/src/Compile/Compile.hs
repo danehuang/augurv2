@@ -112,10 +112,11 @@ normFn catCtx vMod fn =
       RW.factor (Prod hd fn'')
 
         
-frontend :: CompInfo -> Rv.Model -> Maybe (KernU String) -> CompM (ModDecls (TVar Typ), Map.Map (TVar Typ) (TVar Typ), Fn (TVar Typ), Maybe (KernU (TVar Typ)) )
-frontend cinfo model kern =
-    do (modDecls, fn) <- lowerProg model           
+frontend :: CompInfo -> Rv.Model -> Maybe (KernU String) -> [Int] -> CompM (ModDecls (TVar Typ), Map.Map (TVar Typ) (TVar Typ), Fn (TVar Typ), Maybe (KernU (TVar Typ)), Map.Map (TVar Typ) Int )
+frontend cinfo model kern rtSizes =
+    do (modDecls, fn) <- lowerProg model       
        (varsM, modDecls') <- lift $ RnC.runRnModDeclsTyVar cinfo (Rv.model_params model ++ modDecls)
+       let rtSizes' = Map.fromList (zip (map (\(_, v, _) -> v) modDecls') rtSizes)
        fn' <- RnC.runRnFnTyVar cinfo varsM modDecls' fn
        kern' <- rnKern varsM modDecls'
        fn'' <- runLintFn cinfo modDecls' fn'
@@ -123,7 +124,7 @@ frontend cinfo model kern =
        debugM "[Compile.Compile]" $ "After frontend normalization (Density):\n" ++ pprShow fn'''
        -- debugM "Compile" ("[Compile] @frontend | Kernel:\n" ++ pprShow kern')
        propVarsM <- mkPropVarsM modDecls'
-       return (modDecls', propVarsM, fn''', kern')
+       return (modDecls', propVarsM, fn''', kern', rtSizes')
     where
       rnKern varsM modDecls =
           case kern of
@@ -247,31 +248,32 @@ midendFn cinfo copt inferCtx k =
 -----------------------------------
 -- == Backend
 
-backendDecl :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> LX.LowPP (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
-backendDecl cinfo copt inferCtx v_rng lowppDecl =
+backendDecl :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Map.Map (TVar Typ) Int -> LX.LowPP (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
+backendDecl cinfo copt inferCtx v_rng rtSizes lowppDecl =
     do lowmmDecl <- runCgLowMM cinfo copt inferCtx lowppDecl
+       traceM $ "CGBEGIN: " ++ pprShow lowmmDecl
        {-
        cDecls <- CCg.runCgDecl cinfo inferCtx v_rng lowmmDecl
        return (LX.getGlobs (LX.unLowMM lowmmDecl), cDecls)
        -}
-       let rtSizes = Map.empty -- TODO: HACK
        (shpCtx', cDecls) <- CuCg.runCgDecl cinfo copt inferCtx (getTarget copt) rtSizes v_rng lowmmDecl
+       traceM $ "DONE WITH: " ++ show cDecls
        return (shpCtx', cDecls)
        
        
               
               
-backendDecls :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> [LX.LowPP (TVar Typ)]  -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
-backendDecls cinfo copt inferCtx v_rng decls =
-    do (shpCtxs, decls') <- mapM (backendDecl cinfo copt inferCtx v_rng) decls >>= return . unzip
+backendDecls :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Map.Map (TVar Typ) Int -> [LX.LowPP (TVar Typ)]  -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
+backendDecls cinfo copt inferCtx v_rng rtSizes decls =
+    do (shpCtxs, decls') <- mapM (backendDecl cinfo copt inferCtx v_rng rtSizes) decls >>= return . unzip
        let cdecls = concat decls'
            shpCtx = foldl (\acc shpCtx' -> acc `Map.union` shpCtx') Map.empty shpCtxs
        return (shpCtx, cdecls)
 
 
-runBackendDecls :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> [LX.LowPP (TVar Typ)] -> IO (Either String (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)]))
-runBackendDecls cinfo copt inferCtx v_rng decls =
-    runExceptT (backendDecls cinfo copt inferCtx v_rng decls)
+runBackendDecls :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Map.Map (TVar Typ) Int -> [LX.LowPP (TVar Typ)] -> IO (Either String (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)]))
+runBackendDecls cinfo copt inferCtx v_rng rtSizes decls =
+    runExceptT (backendDecls cinfo copt inferCtx v_rng rtSizes decls)
 
 
 -----------------------------------
@@ -287,22 +289,22 @@ cgDet cinfo copt inferCtx detFns =
        return $ Map.fromList detCtx
                         
 
-cgLLMod :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Fn (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
-cgLLMod cinfo copt inferCtx v_rng fn =
+cgLLMod :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> TVar C.Typ -> Map.Map (TVar Typ) Int -> Fn (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
+cgLLMod cinfo copt inferCtx v_rng rtSizes fn =
     do llAll <- runLLFn cinfo copt inferCtx (mkName "ll_mod") fn
        llCall <- runCgCallLLMod
        let foo = LX.LowPP (LX.LowXX Map.empty False (LX.HostCall False) [] llAll)
-       (shpCtx, llAll') <- backendDecl cinfo copt inferCtx v_rng foo
+       (shpCtx, llAll') <- backendDecl cinfo copt inferCtx v_rng rtSizes foo
        return (shpCtx, llAll' ++ [ llCall ])                   
 
               
-compile :: Rv.Model -> Maybe (KernU String) -> Target -> CompM (Py.Decl (TVar Typ), String, String, C.Prog (TVar C.Typ))
-compile model infer target =
+compile :: Rv.Model -> Maybe (KernU String) -> [Int] -> Target -> CompM (Py.Decl (TVar Typ), String, String, C.Prog (TVar C.Typ))
+compile model infer rtSizes target =
     do -- handle <- initCompLogger
        genSym <- lift $ newGenSym
        let cinfo = CompInfo genSym
-           copt = CompOpt True target
-       (modDecls, dupCtx, fn, kern) <- frontend cinfo model infer
+           copt = CompOpt True target True True True
+       (modDecls, dupCtx, fn, kern, rtSizes') <- frontend cinfo model infer rtSizes
        let tlDepG = depTopLevel fn
        debugM "[Compile.Compile]" $ " | Top-level dependencies: " ++ pprShow tlDepG
        let pyTys = genPyTyp modDecls
@@ -317,16 +319,14 @@ compile model infer target =
        detCtx <- cgDet cinfo copt inferCtx (filter (\(_, fn') -> isDirac fn') fns)
        v_rng <- lift $ mkTyIdIO genSym (mkName "rng") ModAux (C.PtrTy (C.NameTy "augur_rng"))
        -- v_idxs <- lift $ mkTyIdIO genSym (mkName "idxs") ModAux (C.VecTy C.IntTy)
-       (shpCtx, cdecls) <- backendDecls cinfo copt inferCtx' v_rng (gatherCode kern'' ++ Map.elems detCtx)
-       (shpCtx', llMod) <- cgLLMod cinfo copt inferCtx' v_rng fn 
+       (shpCtx, cdecls) <- backendDecls cinfo copt inferCtx' v_rng rtSizes' (gatherCode kern'' ++ Map.elems detCtx)
+       (shpCtx', llMod) <- cgLLMod cinfo copt inferCtx' v_rng rtSizes' fn 
        let shpCtx'' = shpCtx `Map.union` shpCtx'                      
        mcmcInit <- runCgStInit cinfo (getTarget copt) v_rng inferCtx' shpCtx'' kern''
-                   
        chdr <- runCgHdr cinfo inferCtx' kern'' shpCtx'' v_rng
        mcmcStep <- runCgMcmcDecl cinfo target tlDepG (mapCode (LX.getDecl . LX.unLowPP) kern'')
        mcmcSetPt <- runCgStSetPt cinfo (getTarget copt) inferCtx'
        mcmcCpy <- runCgStCpy cinfo (getTarget copt) inferCtx'
-       
        -- closeCompLogger handle 
        return (pyModParam, pyTys, chdr, C.Prog (cdecls ++ llMod ++ [ mcmcStep, mcmcSetPt, mcmcCpy, mcmcInit ]))
            

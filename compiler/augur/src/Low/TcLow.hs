@@ -16,7 +16,10 @@
 
 {-# LANGUAGE FlexibleContexts #-}
 
-module Low.TcLow where
+module Low.TcLow 
+    ( mkInferCtxCtx
+    , runTcStmt
+    , runTcDecl ) where
 
 
 import Control.Monad.Reader
@@ -201,13 +204,9 @@ tcStmt (MapRed acc x gen s e) =
               
 tcDecl :: (TypedVar b Typ) => Decl b -> TcM b ()
 tcDecl (Fun _ params allocs body retExp retTy) =
-    do -- mapM_ (\(x, t) -> unify (fromJust $ getType x, t)) params
-       traceM $ "TC | ALLOC " ++ pprShowLs allocs
-       mapM_ (\x -> traceM $ pprShow x ++ " :: " ++ pprShow (getType' x)) allocs
-       let -- Check parameter types match?
+    do let -- Check parameter types match?
            paramTyM = Map.fromList params
            allocTyM = Map.fromList (map (\x -> (x, getType' x)) allocs)
-       -- put (Map.union paramTyM allocTyM)
        modify (\ctx -> ctx `Map.union` paramTyM `Map.union` allocTyM)
        tcStmt body
        retTy' <- case retExp of
@@ -227,24 +226,42 @@ instTyp tyCtx x =
       Nothing -> throwError $ "[TcLow] @instTyp | Lookup of " ++ pprShow x ++ " failed in context: " ++ pprShow tyCtx
 
                  
+instStmt :: (TypedVar b Typ) => Map.Map b Typ -> Stmt b -> ExceptT String IO (Stmt b)
+instStmt tyCtx = T.traverse (instTyp tyCtx)
+
+
 instDecl :: (TypedVar b Typ) => Map.Map b Typ -> Decl b -> ExceptT String IO (Decl b)
-instDecl tyCtx decl = T.traverse (instTyp tyCtx) decl
+instDecl tyCtx = T.traverse (instTyp tyCtx)
+
 
 
 -----------------------------------
 -- == Top-level
 
+mkInferCtxCtx :: (TypedVar b Typ) => InferCtx b -> Map.Map b Typ
+mkInferCtxCtx inferCtx =
+    let modDecls = ic_modDecls inferCtx
+        dupCtx = ic_dupCtx inferCtx
+        modDeclsCtx = Map.fromList (map (\(_, x, ty) -> (x, ty)) modDecls)
+        dupCtxCtx = Map.fromList (map (\v -> (fromJust (Map.lookup v dupCtx), getType' v)) (getModParamIds modDecls))
+        shpCtx = Map.singleton (getIdxVar inferCtx) (VecTy IntTy)
+    in 
+      modDeclsCtx `Map.union` dupCtxCtx `Map.union` shpCtx
+
+
+runTcStmt :: (TypedVar b Typ) => InferCtx b -> Map.Map b Typ -> Stmt b -> IO (Either String (Stmt b))
+runTcStmt inferCtx ctx s =
+    do let ctx' = mkInferCtxCtx inferCtx
+           ctx'' = ctx `Map.union` ctx'
+       (v, tyCtx) <- runStateT (runExceptT (tcStmt s)) ctx''
+       case v of
+         Left errMsg -> return $ Left errMsg
+         Right _ -> runExceptT (instStmt tyCtx s)
+
+
 runTcDecl :: (TypedVar b Typ) => InferCtx b -> Decl b -> IO (Either String (Decl b))
 runTcDecl inferCtx decl =
-    do traceM $ "[TC] | BEGIN\n"
-       let modDecls = ic_modDecls inferCtx
-           dupCtx = ic_dupCtx inferCtx
-           modDeclsCtx = Map.fromList (map (\(_, x, ty) -> (x, ty)) modDecls)
-           dupCtxCtx = Map.fromList (map (\v -> (fromJust (Map.lookup v dupCtx), getType' v)) (getModParamIds modDecls))
-           shpCtx = Map.singleton (getIdxVar inferCtx) (VecTy IntTy)
-           ctx = modDeclsCtx `Map.union` dupCtxCtx `Map.union` shpCtx
-       traceM $ "[TC] | ModDecls: " ++ pprShow modDeclsCtx
-       traceM $ "[TC] | DupCtx: " ++ pprShow dupCtx
+    do let ctx = mkInferCtxCtx inferCtx
        traceM $ "[TC] | DECL: \n" ++ pprShow decl
        (v, tyCtx) <- runStateT (runExceptT (tcDecl decl)) ctx
        traceM $ "END OF TC" ++ pprShow tyCtx

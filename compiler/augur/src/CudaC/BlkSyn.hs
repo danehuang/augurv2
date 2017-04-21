@@ -53,6 +53,7 @@ for (x <- gen_x) {
 }
 
 -}
+
 data Comp b = Single SingleComp (Stmt b)
             | Block LoopKind b (Gen b) (Stmt b)
             | Reduce (Maybe (b, (Gen b))) (Exp b) b (Gen b) (Stmt b) (Exp b)
@@ -104,10 +105,14 @@ isLocalStmt (Loop _ x gen s) = isLocalId x && isLocalGen gen && isLocalStmt s
 isLocalStmt (MapRed acc x gen s e) = isLocalId acc && isLocalId x && isLocalGen gen && isLocalStmt s && isLocalExp e
 
 
-        
+canonizeBlk :: (TypedVar b Typ) => Comp b -> Comp b
+canonizeBlk (Single sc s) = Single sc (canonizeStmt s)
+canonizeBlk (Block lk x gen s) = Block lk x gen (canonizeStmt s)
+canonizeBlk (Reduce ctx acc x gen s ret) = Reduce ctx acc x gen (canonizeStmt s) ret
+                                     
 partitionStmt :: (TypedVar b Typ) => Stmt b -> [Comp b]
-partitionStmt s = go (break isLoop (splat s) )
-    where
+partitionStmt s = map canonizeBlk (go (break isLoop (splat s)))
+    where 
       go ([], []) =
           []
       go (left, []) =

@@ -191,6 +191,7 @@ emitPrim ReadMatFromShape = "readMatFromShape"
 emitPrim NormAndSamp = "augur_unnorm_disc_samp"
 emitPrim AtmIncVec = "augur_vec_atm_plus"
 emitPrim AtmIncMatVTMT = "augur_mat_atm_inc_vtmt"
+emitPrim PllSumVec = "augur_pll_sum_vec"
 emitPrim (EllipSlice _) = "augur_mcmc_eslice"
 emitPrim (LeapFrog _ _) = "h_augur_mcmc_hmc"
 emitPrim prim = compErr $ "Cannot emit primitive " ++ pprShow prim

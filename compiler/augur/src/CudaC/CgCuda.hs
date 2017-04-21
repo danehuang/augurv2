@@ -14,6 +14,8 @@
  - limitations under the License.
  -}
 
+{-# LANGUAGE BangPatterns #-}
+
 module CudaC.CgCuda
     ( runCgDecl
     , runCgDecls ) where
@@ -38,6 +40,7 @@ import qualified Low.LowXXSyn as LX
 import Core.CoreTySyn
 import Low.LowpPrimSyn
 import CudaC.CgCudaCCore hiding (compErr)
+import CudaC.SplitBlk
 import qualified CudaC.BlkSyn as B
 import qualified CudaC.PllBlk as PB
 import qualified Low.LowShpSyn as S
@@ -88,7 +91,8 @@ data CgRdr =
        , cr_genSym :: GenSym }
 data CgSt =
     CS { -- when parallelizing, may need to allocate more memory
-         cs_shpCtx :: Map.Map (TVar Typ) (Typ, S.Shp (TVar Typ))
+         cs_shpCtxUp :: Map.Map (TVar Typ) Bool
+       , cs_shpCtx :: Map.Map (TVar Typ) (Typ, S.Shp (TVar Typ))
          -- cs_shpCtx :: S.ShpCtx (TVar Typ)
        }
 
@@ -227,15 +231,17 @@ genToShpExp (Until e1 e2) =
 
 updateShp :: TVar Typ -> Gen (TVar Typ) -> CgM ()
 updateShp v gen =
-    modify (\st -> case Map.lookup v (cs_shpCtx st) of
-                     Just (_, shp) ->
+    modify (\st -> case (Map.lookup v (cs_shpCtxUp st), Map.lookup v (cs_shpCtx st)) of
+                     (Just False, Just (_, shp)) ->
                          let ty' = VecTy (getType' v)
                              v' = setType v ty'
                              shp' = S.SingConn (genToShpExp gen) shp
                          in 
                            -- Kind of weird ... 
-                           st { cs_shpCtx = Map.insert v' (ty', shp')  (cs_shpCtx st) }
-                     Nothing -> error $ "Lookup of " ++ pprShow v ++ " failed in shape context: " ++ pprShow (cs_shpCtx st)
+                           st { cs_shpCtxUp = Map.insert v' True (cs_shpCtxUp st)
+                              , cs_shpCtx = Map.insert v' (ty', shp') (cs_shpCtx st) }
+                     (Just True, _) -> st
+                     _ -> error $ "Lookup of " ++ pprShow v ++ " failed in shape context: " ++ pprShow (cs_shpCtx st)
            )
 
 
@@ -534,31 +540,45 @@ cgDeclDev inferCtx useProp (Fun name params allocs body retExp retTy) =
            decl' = C.Fun [C.Device] name params' body'' retExp' retTy'
        return [ decl' ]
 
-
+              
 cgDeclBlk :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> Map.Map (TVar Typ) Int -> Bool -> Bool -> Decl (TVar Typ) -> CgM [C.Decl (TVar C.Typ)]
 cgDeclBlk cinfo copt inferCtx rtSizeCtx useProp onDev decl =
-    do lift $ debugM "[CudaC.CgCuda]" $ "Input:\n" ++ pprShow decl
-       -- decl' <- lift $ runInlineDecl cinfo copt inferCtx decl
-       -- lift $ debugM "[CudaC.CgCuda]" $ "Inlined:\n" ++ pprShow decl'
-       let Fun name params allocs body retExp retTy = decl
+    do lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | Input:\n" ++ pprShow decl
+       decl' <- if getInline copt
+                then lift $ runInlineDecl cinfo copt inferCtx decl
+                else return decl
+       let Fun name params allocs body retExp retTy = decl'
            comps = B.partitionStmt body
-       lift $ debugM "[CudaC.CgCuda]" $ "Blks:\n" ++ pprShowLs' comps
-       -- TODO: COMMUTE OPTIMIZATION with rtSizeCtx
-       let comps' = comps
+           paramTyCtx = Map.fromList params
+           allocTyCtx = Map.fromList (map (\x -> (x, getType' x)) allocs)
+           openCtx = paramTyCtx `Map.union` allocTyCtx
+       lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | Blocks:\n" ++ pprShowLs' comps
+       comps' <- if getSplitOnLoop copt
+                 then mapM (\comp -> lift $ runSplitComp cinfo copt inferCtx rtSizeCtx openCtx comp) comps >>= return . concat
+                 else return comps
+       lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | SplitLoop:\n" ++ pprShowLs' comps'
+       shpCtx'' <- gets cs_shpCtx
+       let shpCtx''' = Map.map (\(_, shp) -> shp) shpCtx''
+       (shpCtxs, compss') <- lift $ mapM (splitAtmIncComp (getGenSym cinfo) shpCtx''' rtSizeCtx ) comps' >>= return . unzip
+       let comps'' = concat compss'
+           shpCtx = foldl (\acc ctx -> ctx `Map.union` acc) Map.empty shpCtxs
+           allocs' = allocs ++ Map.keys shpCtx
+       modify (\st -> st { cs_shpCtx = shpCtx `Map.union` cs_shpCtx st })
+       lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | SplitAtmInc:\n" ++ pprShowLs' comps''
        let idxs = map fst (filter (isGridIdx . idKind . fst) params)
        s_projIdx <- cgProjIdx idxs
        params' <- cgParams useProp params
-       (calls, decls) <- mapM (cgCallAndKern inferCtx useProp name allocs params onDev) comps' >>= return . unzip
+       (calls, decls) <- mapM (cgCallAndKern inferCtx useProp name allocs' params onDev) comps'' >>= return . unzip
        retExp' <- T.mapM cgExp retExp 
        let retTy' = cgTyp Param retTy
            attribs' = if onDev then [C.Device] else []
            body' = C.seqStmt calls
            useCtx = cntVarUse body'
-       s_unpack <- cgUnpackMcmcSt' inferCtx useProp useCtx allocs
+       s_unpack <- cgUnpackMcmcSt' inferCtx useProp useCtx allocs'
        let body'' =  C.seqStmt [ s_unpack, s_projIdx, body']
-           decl' = C.Fun attribs' name params' body'' retExp' retTy'
-       lift $ debugM "[CudaC.CgCuda]" $ "Output:\n" ++ pprShow decl'
-       return $ concat decls ++ [decl']
+           decl'' = C.Fun attribs' name params' body'' retExp' retTy'
+       lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | Output:\n" ++ pprShow decl''
+       return $ concat decls ++ [decl'']
 
               
 {-              
@@ -614,8 +634,9 @@ initCgRdr cinfo inferCtx target v_rng =
 runCgDecl :: CompInfo -> CompOpt -> InferCtx (TVar Typ) -> Target -> Map.Map (TVar Typ) Int -> TVar C.Typ -> LX.LowMM (TVar Typ) -> CompM (S.ShpCtx (TVar Typ), [C.Decl (TVar C.Typ)])
 runCgDecl cinfo copt inferCtx mode rtsizes v_rng lowmmDecl =
     do rdr <- initCgRdr cinfo inferCtx mode v_rng
-       let st = CS (Map.mapWithKey (\x shp -> (getType' x, shp)) (LX.getGlobs (LX.unLowMM lowmmDecl)))
-       (decls, CS shpCtx', _) <- runRWST (cgDecl cinfo copt mode inferCtx rtsizes lowmmDecl) rdr st
+       let shpCtx = LX.getGlobs (LX.unLowMM lowmmDecl)
+           st = CS (Map.map (\_ -> False) shpCtx) (Map.mapWithKey (\x shp -> (getType' x, shp)) shpCtx)
+       (decls, CS _ shpCtx', _) <- runRWST (cgDecl cinfo copt mode inferCtx rtsizes lowmmDecl) rdr st
        return (Map.map snd shpCtx', decls)
 
 

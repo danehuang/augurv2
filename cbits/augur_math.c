@@ -161,3 +161,24 @@ __HOSTDEV__ void augur_dotprod_grad_0(AugurVec_t* dst, real_t adj, AugurVec_t* v
   }
   }
 }
+
+__HOSTDEV__ void augur_dotprod_grad_1(AugurVec_t* dst, real_t adj, AugurVec_t* v1, AugurVec_t* v2) {
+  switch (v1->ty) {
+  case AUGUR_INT: {
+    for (uint_t i = 0; i < dst->elems; i++) {
+      AUGUR_VEC_SETD(dst, i, adj * AUGUR_VEC_GETI(v1, i));
+    }
+    break;
+  }
+  case AUGUR_DBL: {
+    for (uint_t i = 0; i < dst->elems; i++) {
+      AUGUR_VEC_SETD(dst, i, adj * AUGUR_VEC_GETD(v1, i));
+    }
+    break;
+  }
+  default: {
+    // TODO: ERROR 
+    break;
+  }
+  }
+}

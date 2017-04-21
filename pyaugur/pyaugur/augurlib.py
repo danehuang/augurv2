@@ -291,6 +291,7 @@ class AugurInfer:
 
         # Invoke the compiler
         logmsg('Compiling model...')
+        logmsg('RtSizes... ' + str(rtsizes))
         result = compiler(self.model, target, userSched, userMode, rtsizes)
 
         # Parse the results

@@ -18,6 +18,7 @@
 
 module Low.LintLow where
 
+import qualified Data.Map as Map
 import Control.Monad.Except
 import Debug.Trace
 
@@ -52,28 +53,31 @@ type LintM = CompM
 -----------------------------------
 -- == Transformations
 
-{-
-lintStmt :: (TypedVar b Typ) => GenSym -> Bool -> InferCtx b -> Stmt b -> LintM (Stmt b)
-lintStmt genSym linProj inferCtx stmt =
-    do stmt' <- Lin.runLinStmt genSym linProj decl
+lintStmt :: (TypedVar b Typ) => GenSym -> Bool -> InferCtx b -> Map.Map b Typ -> Stmt b -> LintM (Stmt b)
+lintStmt genSym linProj inferCtx tyCtx stmt =
+    do stmt' <- Lin.runLinStmt genSym linProj stmt
        let stmt'' = canonizeStmt stmt'
-       stmt''' <- (liftIO $ Tc.runTcDecl inferCtx decl'') >>= hoistExcept
-       return decl'''
--}
+       stmt''' <- (liftIO $ Tc.runTcStmt inferCtx tyCtx stmt'') >>= hoistExcept
+       return stmt'''
+
 
 lintDecl :: (TypedVar b Typ) => GenSym -> Bool -> InferCtx b -> Decl b -> LintM (Decl b)
 lintDecl genSym linProj inferCtx decl =
     do decl' <- Lin.runLinDecl genSym linProj decl
-       -- traceM $ "[LINT] | Result of linearizing...\n" ++ pprShow decl'
        let decl'' = decl' { f_body = canonizeStmt (f_body decl') }
-       -- traceM $ "[LINT] | Canonicalize...\n" ++ pprShow decl''
        decl''' <- (liftIO $ Tc.runTcDecl inferCtx decl'') >>= hoistExcept
-       -- traceM $ "[LINT] | Result of type-checking...\n" ++ pprShow decl'''
        return decl'''
 
               
 -----------------------------------
 -- == Top-level
+
+runLintStmt :: (TypedVar b Typ) => CompInfo -> Bool -> InferCtx b -> Map.Map b Typ -> Stmt b -> CompM (Stmt b)
+runLintStmt cinfo linProj inferCtx openCtx stmt =
+    do debugM "Low.LintLow" $ "LowPP/LowMM (Input) linProj: " ++ show linProj ++ "\n" ++ pprShow stmt
+       stmt' <- lintStmt (getGenSym cinfo) linProj inferCtx openCtx stmt
+       debugM "Low.LintLow" $ "LowPP/LowMM (Output):\n" ++ pprShow stmt'
+       return stmt'
 
 
 runLintDecl :: (TypedVar b Typ) => CompInfo -> Bool -> InferCtx b -> Decl b -> CompM (Decl b)

@@ -68,6 +68,7 @@ data Prim = Neg
           | AtmIncBase           -- ^ x += 
           | AtmIncVec            -- ^ MvNormal-MvNormal conjugacy
           | AtmIncMatVTMT        -- ^ InvWishart-MvNormal conjugacy
+          | PllSumVec            -- ^ foobar??
             
           -- Special
           | MWG Name Name Name   -- ^ For MWG: proposal, swap, likelihood
@@ -103,6 +104,7 @@ instance Pretty Prim where
     ppr AtmIncBase = error "huh!??"
     ppr AtmIncVec = text "atmIncVec"
     ppr AtmIncMatVTMT = text "atmIncMatVTMT"
+    ppr PllSumVec = text "pllSumVec"
     ppr (MWG _ _ _) = text "mwg"
     ppr (EllipSlice _) = text "ellipSlice"
     ppr (LeapFrog _ _) = text "leapFrog"
@@ -194,6 +196,7 @@ getPrimTyFn pm prim =
       AtmIncVec -> [ ArrTy [VecTy RealTy, VecTy RealTy] UnitTy ]
       AtmIncMatVTMT -> [ ArrTy [MatTy RealTy, VecTy RealTy] UnitTy ]
       AtmIncBase -> compErr $ "TODO type for " ++ pprShow AtmIncBase
+      PllSumVec -> [ ArrTy [VecTy RealTy, VecTy (VecTy RealTy)] UnitTy ]
       (MWG _ _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK
       (EllipSlice _) -> [ ArrTy [VecTy RealTy] UnitTy ] -- TODO: HACK
       (LeapFrog _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK

@@ -70,6 +70,9 @@ getGenSym = cinfo_genSym
 data CompOpt =
     CompOpt { f_lint :: Bool            -- ^ Lint flag
             , getTarget :: Target       -- ^ Target
+            , getInline :: Bool         -- ^ Inlining?
+            , getSplitOnLoop :: Bool    -- ^ Split loops (e.g., for commuting loops)
+            , getSplitOnAtmInc :: Bool  -- ^ Split loop computations with atomic increments?
             }
 
 getLint :: CompOpt -> Bool

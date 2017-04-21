@@ -101,6 +101,8 @@ cgAuxStruct inferCtx shpCtx kernParams v_rng =
            allocs = map cgStrctDecl (map fst (Map.toList shpCtx))
            kernParams' = map cgStrctDecl kernParams
        traceM $ "[CgMcmcRepr] | modDecls " ++ show (getModDeclIds modDecls)
+       traceM $ "[CgMcmcRepr] | hypers " ++ show hypers
+       traceM $ "[CgMcmcRepr] | allocs " ++ show allocs
        return $ C.Struct "AugurAux" ([ rng, idxs ] ++ hypers ++ allocs ++ kernParams') (Just "AugurAux_t")
        
              

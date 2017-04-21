@@ -16,7 +16,9 @@
 
 {-# LANGUAGE FlexibleContexts #-}
 
-module Low.ProjLow where
+module Low.ProjLow 
+    ( runProjStmt
+    , runProjDecl ) where
 
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -195,6 +197,11 @@ projDecl (Fun name params alloc body retExp retTy) =
 
 -----------------------------------
 -- == Top-level
+
+runProjStmt :: (TypedVar b Typ) => CompInfo -> Stmt b -> CompM (Stmt b)
+runProjStmt cinfo s =
+    do v <- runReaderT (projStmt s) (getGenSym cinfo)
+       return v
 
 runProjDecl :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> Decl b -> CompM (Decl b)
 runProjDecl cinfo copt inferCtx decl =

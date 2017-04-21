@@ -211,9 +211,10 @@ conjInvWishMvNorm (DI InvWishart p_ept p_es) (DI MvNormal l_ept l_es) =
     do v_obs <- conjStatId Anon (obsTy (densPtTy p_ept))
        v_cnt <- conjStatId Anon (cntTy (densPtTy p_ept))
        v_diff <- conjStatId Anon (diffTy (densPtTy l_ept))
-       let shp_obs = S.shpExpsToShp (S.repShpFromSkel (densPtVar p_ept) (length (densPtIdx p_ept)) (S.Cpy (densPtVar p_ept)))
-           shp_cnt = S.shpExpsToShp (init (S.tyToDims (densPtVar p_ept)))
-           -- shp_diff = S.shpExpsToShp (S.tyToDims (densPtVar l_ept))
+       let -- shp_obs = S.shpExpsToShp (S.repShpFromSkel (densPtVar p_ept) (length (densPtIdx p_ept)) (S.Cpy (densPtVar p_ept)))
+           shp_obs = S.mkCpy (densPtVar p_ept)
+           v_ept' = setType (densPtVar p_ept) (cntTy (densPtTy p_ept))
+           shp_cnt = S.shpExpsToShp (S.tyToDims v_ept')
            shp_diff = S.mkCpy (densPtVar l_ept)
        modify (\st -> st { cs_stats = [ (v_obs, shp_obs), (v_cnt, shp_cnt), (v_diff, shp_diff) ] })
        let es_priorIdxs = densPtIdx' p_ept           
