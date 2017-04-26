@@ -36,6 +36,7 @@ __HOSTDEV__ real_t augur_bernoulli_pdf(int pt, real_t bias);
 __HOSTDEV__ real_t augur_bernoulli_ll(int pt, real_t bias);
 __HOSTDEV__ real_t augur_bernoulli_dotarg1(int pt, real_t bias);
 __HOSTORDEV__ int augur_bernoulli_sample(augur_rng *rng, real_t bias);
+int h_augur_bernoulli_sample(gsl_rng* rng, real_t bias);
 
 
 /* Categorical */

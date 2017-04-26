@@ -63,6 +63,15 @@ uint_t augur_max(uint_t i1, uint_t i2) {
   else return i1;
 }
 
+int augur_indicator(int cond) {
+  if (cond) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
+}
+
 void augur_tab(int tab) {
   for (int i = 0; i < tab; i++) {
     printf(" ");

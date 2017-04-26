@@ -100,6 +100,7 @@ __device__ double atomicAdd(double* address, double val);
 
 uint_t augur_min(uint_t i1, uint_t i2);
 uint_t augur_max(uint_t i1, uint_t i2);
+int augur_indicator(int cond);
 void augur_tab(int tab);
 
 

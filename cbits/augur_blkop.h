@@ -61,6 +61,7 @@ real_t h_augur_blk_dot(AugurMemLoc_t loc, AugurBlk_t* blk1, AugurBlk_t* blk2);
 
 void h_augur_blk_mk_group(AugurBlk_t* dst, uint_t num_blks, AugurTyp_t* typs, void** blks);
 void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, AugurTyp_t* typs, void** blks);
+void h_augur_blk_mk_cpy2(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src);
 
 void h_augur_blk_to_native(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src, Bool_t f_cpy);
 void h_augur_blk_from_native(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src);

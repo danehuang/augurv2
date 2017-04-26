@@ -221,6 +221,16 @@ cgMidend' cinfo copt inferCtx k =
                    (v_currBlk, v_propBlk) <- mkBlkId cinfo v_wrt
                    kern <- lift $ runHmcFn cinfo copt inferCtx v_wrt v_currBlk v_propBlk simLen stepSize fn
                    return kern
+            GradProp (NUTS _ _ stepSize) ->
+                do let v_wrt = kuVars ku
+                   (v_currBlk, v_propBlk) <- mkBlkId cinfo v_wrt
+                   kern <- lift $ runNUTSFn cinfo copt inferCtx v_wrt v_currBlk v_propBlk stepSize fn
+                   return kern
+            GradProp (Reflect _ _ simLen stepSize) ->
+                do let v_wrt = kuVars ku
+                   (v_currBlk, v_propBlk) <- mkBlkId cinfo v_wrt
+                   kern <- lift $ runRSliceFn cinfo copt inferCtx v_wrt v_currBlk v_propBlk simLen stepSize fn
+                   return kern
             Slice (Ellip _ _) -> 
                 do let v_mod = head (kuVars ku)
                    kern <- lift $ runESliceFn cinfo copt inferCtx v_mod fn
@@ -230,7 +240,7 @@ cgMidend' cinfo copt inferCtx k =
                        (fn', _) = RW.split v_mod fn
                    propFn <- lift $ runLowerUserCode fn' code           
                    kern <- lift $ runMwgKern cinfo copt inferCtx v_mod fn propFn
-                   return kern
+                   return kern            
             _ -> error $ "[Compile] @ cgMidend | TODO " ++ pprShow kind
       Tensor k1 k2 ->
           do k1' <- cgMidend' cinfo copt inferCtx k1

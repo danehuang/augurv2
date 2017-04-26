@@ -216,6 +216,26 @@ cgMcmcCall (Call (PrimId _ _ (LeapFrog grad prop)) es) =
                   [ C.mkLiterally (nameToStr grad), C.mkLiterally (nameToStr prop) ]
            s_call = C.mkLibCall "h_augur_mcmc_hmc" es''
        return s_call
+cgMcmcCall (Call (PrimId _ _ (ReflSlice grad prop)) es) =
+    do es' <- mapM cgExp es
+       vAux <- asks cr_vAux
+       vCurr <- asks cr_vCurr
+       vProp <- asks cr_vProp
+       target <- asks cr_target
+       let es'' = [ target, C.Var vAux, C.Var vCurr, C.Var vProp ] ++ es' ++ 
+                  [ C.mkLiterally (nameToStr grad), C.mkLiterally (nameToStr prop) ]
+           s_call = C.mkLibCall "h_augur_mcmc_refl_slice" es''
+       return s_call
+cgMcmcCall (Call (PrimId _ _ (NUTS grad prop)) es) =
+    do es' <- mapM cgExp es
+       vAux <- asks cr_vAux
+       vCurr <- asks cr_vCurr
+       vProp <- asks cr_vProp
+       target <- asks cr_target
+       let es'' = [ target, C.Var vAux, C.Var vCurr, C.Var vProp ] ++ es' ++ 
+                  [ C.mkLiterally (nameToStr grad), C.mkLiterally (nameToStr prop) ]
+           s_call = C.mkLibCall "h_augur_mcmc_nuts" es''
+       return s_call
 cgMcmcCall _ =
     return $ C.mkSkip
 
@@ -305,6 +325,8 @@ cgStmt (Exp e) =
       Call (PrimId _ _ (MWG _ _ _)) _ -> cgMcmcCall e
       Call (PrimId _ _ (EllipSlice _)) _ -> cgMcmcCall e
       Call (PrimId _ _ (LeapFrog _ _)) _ -> cgMcmcCall e
+      Call (PrimId _ _ (ReflSlice _ _)) _ -> cgMcmcCall e
+      Call (PrimId _ _ (NUTS _ _)) _ -> cgMcmcCall e
       _ -> cgExp e >>= \e' -> return $ C.Exp e'
 cgStmt (Assign x e) =
     case e of

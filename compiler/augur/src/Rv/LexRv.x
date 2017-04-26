@@ -100,9 +100,11 @@ tokens :-
 
 <0> "MWG"                 { mkL RvT_MWG }
 <0> "HMC"                 { mkL RvT_HMC }
+<0> "NUTS"                { mkL RvT_NUTS }
 <0> "DiscGibbs"           { mkL RvT_DiscGibbs }
 <0> "ConjGibbs"           { mkL RvT_ConjGibbs }
 <0> "ESlice"              { mkL RvT_ESlice }
+<0> "RSlice"              { mkL RvT_RSlice }
 
 -- Distributions
 <0> @dist                 { mkDist Pdf  }
@@ -157,9 +159,11 @@ data RvToken
 
   | RvT_MWG
   | RvT_HMC
+  | RvT_NUTS
   | RvT_DiscGibbs
   | RvT_ConjGibbs
   | RvT_ESlice
+  | RvT_RSlice
 
   | RvT_Dist (Dop, Dist)
   | RvT_Prim Prim

@@ -376,22 +376,49 @@ cgBlkKernAux shpCtx loc v_strct = go
                 do let v_grad = fst (allocs !! 0)
                        v_mom0 = fst (allocs !! 1)
                        v_mom = fst (allocs !! 2)
-                   s1 <- case Map.lookup v_grad shpCtx of
-                           Just (S.BlkOf vs) -> cgXferBlk v_strct vs v_grad
-                           _ -> error $ "[CgStInit] | Couldn't find " ++ pprShow v_mom0
-                   s2 <- case Map.lookup v_mom0 shpCtx of
-                           Just (S.BlkOf vs) -> cgCpyBlk loc v_strct v_mom0 vs
-                           _ -> error $ "[CgStInit] | Couldn't find " ++ pprShow v_mom0
-                   s3 <- case Map.lookup v_mom shpCtx of
-                           Just (S.BlkOf vs) -> cgCpyBlk loc v_strct v_mom vs
-                           _ -> error $ "[CgStInit] | Couldn't find " ++ pprShow v_mom
+                   s1 <- xferBlk v_grad 
+                   s2 <- cpyBlk v_mom0 
+                   s3 <- cpyBlk v_mom
                    return $ C.seqStmt [ s1, s2, s3 ]
+            GradProp (NUTS _ _ _) ->
+                do let v_grad = fst (allocs !! 0)
+                       v_work = fst (allocs !! 1)
+                       v_thetaMinus = fst (allocs !! 2)
+                       v_momMinus = fst (allocs !! 3)
+                       v_thetaPlus = fst (allocs !! 4)
+                       v_momPlus = fst (allocs !! 5)
+                       v_thetaShape = fst (allocs !! 6)
+                   s1 <- xferBlk v_grad 
+                   s2 <- cpyBlk v_work
+                   s3 <- cpyBlk v_thetaMinus
+                   s4 <- cpyBlk v_momMinus
+                   s5 <- cpyBlk v_thetaPlus
+                   s6 <- cpyBlk v_momPlus
+                   s7 <- cpyBlk' exp_AUGUR_CPU v_thetaShape
+                   return $ C.seqStmt [ s1, s2, s3, s4, s5, s6, s7 ]
+            GradProp (Reflect _ _ _ _) ->
+                do let v_grad = fst (allocs !! 0)
+                       v_mom0 = fst (allocs !! 1)
+                   s1 <- xferBlk v_grad
+                   s2 <- cpyBlk v_mom0
+                   return $ C.seqStmt [ s1, s2 ]
             _ -> return $ C.mkSkip
       go (Tensor k1 k2) =
           do s1 <- go k1
              s2 <- go k2
              return $ C.Seq s1 s2
 
+      xferBlk v = 
+          case Map.lookup v shpCtx of
+            Just (S.BlkOf vs) -> cgXferBlk v_strct vs v
+            _ -> error $ "[CgStInit] | Couldn't find " ++ pprShow v
+                           
+      cpyBlk' loc' v =
+          case Map.lookup v shpCtx of
+            Just (S.BlkOf vs) -> cgCpyBlk loc' v_strct v vs
+            _ -> error $ "[CgStInit] | Couldn't find " ++ pprShow v
+
+      cpyBlk v = cpyBlk' loc v
               
 {-| [Note] Allocate all state
 
@@ -554,11 +581,18 @@ cgKernParamInit e_strct = go
       go (Base kind _ _ _ kernParams _) =
           case kind of
             GradProp (HMC _ _ simLen stepSize) ->
-                [ C.assignStmt' (C.derefStrct' e_strct (C.Var (cgId (kernParams !! 0)))) (C.Lit (C.Dbl simLen))
-                , C.assignStmt' (C.derefStrct' e_strct (C.Var (cgId (kernParams !! 1)))) (C.Lit (C.Dbl stepSize)) ]
+                setLenStep kernParams simLen stepSize
+            GradProp (NUTS _ _ stepSize) ->
+                [ C.assignStmt' (C.derefStrct' e_strct (C.Var (cgId (kernParams !! 0)))) (C.Lit (C.Dbl stepSize)) ]
+            GradProp (Reflect _ _ simLen stepSize) ->
+                setLenStep kernParams simLen stepSize
             _ -> [C.mkSkip]
       go (Tensor k1 k2) = go k1 ++ go k2
-
+                          
+      setLenStep kernParams simLen stepSize =
+          [ C.assignStmt' (C.derefStrct' e_strct (C.Var (cgId (kernParams !! 0)))) (C.Lit (C.Dbl simLen))
+          , C.assignStmt' (C.derefStrct' e_strct (C.Var (cgId (kernParams !! 1)))) (C.Lit (C.Dbl stepSize)) ]
+                          
 
 runCgCallLLMod :: CompM (C.Decl (TVar C.Typ))
 runCgCallLLMod =

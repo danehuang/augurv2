@@ -131,7 +131,15 @@ cgGradProp allocs kernParams pk =
              let e_simLen = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 0)))
                  e_stepSize = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 1)))
              return $ C.mkLibCall (declName' prop) [ e_aux, e_curr, e_prop, e_simLen, e_stepSize ]
-      Reflect _ -> error $ "[CgKern] @cgGradProp | TODO"                   
+      NUTS grad prop stepSize ->
+          do (e_curr, e_prop, e_aux) <- askMcmcRepr
+             let  e_stepSize = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 0)))
+             return $ C.mkLibCall (declName' prop) [ e_aux, e_curr, e_prop, e_stepSize ]
+      Reflect grad prop simLen stepSize ->
+          do (e_curr, e_prop, e_aux) <- askMcmcRepr
+             let e_simLen = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 0)))
+                 e_stepSize = C.strctProj'' e_aux (C.Var (cgId (kernParams !! 1)))
+             return $ C.mkLibCall (declName' prop) [ e_aux, e_curr, e_prop, e_simLen, e_stepSize ]
 
 cgGibbs :: [(TIdTy, AllocKind)] -> GibbsKind (Decl TIdTy) -> TyId -> C.Exp (TVar C.Typ) -> CgM (C.Stmt TIdCTy)
 cgGibbs allocs gk v_mod loc =

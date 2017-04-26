@@ -74,6 +74,8 @@ data Prim = Neg
           | MWG Name Name Name   -- ^ For MWG: proposal, swap, likelihood
           | EllipSlice Name      -- ^ For elliptical slice: likelihood
           | LeapFrog Name Name   -- ^ For HMC: gradient, likelihood
+          | NUTS Name Name       -- ^ For No-U-Turn: gradient, likelihood
+          | ReflSlice Name Name  -- ^ For reflective slice: gradient, likelihood
             deriving (Eq, Show)
 
 
@@ -108,6 +110,8 @@ instance Pretty Prim where
     ppr (MWG _ _ _) = text "mwg"
     ppr (EllipSlice _) = text "ellipSlice"
     ppr (LeapFrog _ _) = text "leapFrog"
+    ppr (NUTS _ _) = text "nuts"
+    ppr (ReflSlice _ _) = text "reflSlice"
 
 instance Primitive Prim Typ where
     getPrimTy = getPrimTy'
@@ -197,9 +201,11 @@ getPrimTyFn pm prim =
       AtmIncMatVTMT -> [ ArrTy [MatTy RealTy, VecTy RealTy] UnitTy ]
       AtmIncBase -> compErr $ "TODO type for " ++ pprShow AtmIncBase
       PllSumVec -> [ ArrTy [VecTy RealTy, VecTy (VecTy RealTy)] UnitTy ]
-      (MWG _ _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK
-      (EllipSlice _) -> [ ArrTy [VecTy RealTy] UnitTy ] -- TODO: HACK
+      (MWG _ _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK (separate syntactic category)
+      (EllipSlice _) -> [ ArrTy [VecTy RealTy] UnitTy ] -- TODO: HACK 
       (LeapFrog _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK
+      (ReflSlice _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK
+      (NUTS _ _) -> [ ArrTy [] UnitTy ] -- TODO: HACK
 
                         
 getPrimTy' :: DopMode -> PrimMode -> Prim -> [Typ]

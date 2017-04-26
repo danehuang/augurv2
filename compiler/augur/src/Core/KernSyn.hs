@@ -89,8 +89,33 @@ mkUserConjGibbs v_mod =
 mkUserESlice :: b -> KernU b
 mkUserESlice v_mod =
     Base (Slice (Ellip Empty Empty)) (Single v_mod) (dirac v_mod []) [] [] Empty
+
+
+mkUserNUTS :: [b] -> Maybe Double -> KernU b
+mkUserNUTS v_mods opt =
+    Base (GradProp (NUTS Empty Empty stepSize)) (Block v_mods) (prodFn (map (\v -> dirac v []) v_mods)) [] [] Empty
+    where
+      stepSize =
+          case opt of
+            Just stepSize' -> stepSize'
+            Nothing -> 0.05
+    
+
          
-                
+mkUserRSlice :: [b] -> Maybe (Double, Double) -> KernU b
+mkUserRSlice v_mods opt =
+    Base (GradProp (Reflect Empty Empty simLen stepSize)) (Block v_mods) (prodFn (map (\v -> dirac v []) v_mods)) [] [] Empty
+    where
+      simLen =
+          case opt of
+            Just (simLen', _) -> simLen'
+            Nothing -> 1.0
+
+      stepSize =
+          case opt of
+            Just (_, stepSize') -> stepSize'
+            Nothing -> 0.05
+         
 data Kern code b = Base (KernKind code) (KernUnit b) (Fn b) [(b, AllocKind)] [b] code
                  -- ^ kernel kind, kernel unit, unnormalized full-cond, kernel allocs, kernel parameters, full-cond likelihood code
               
@@ -119,7 +144,8 @@ data PropKind code = Joint code           -- ^ proposal
 
                          
 data GradKind code = HMC code code Double Double  -- ^ gradient, proposal
-                   | Reflect code         -- ^ gradient
+                   | NUTS code code Double -- ^ gradient, proposal
+                   | Reflect code code Double Double -- ^ gradient, proposal
                 deriving (Show)
 
 data GibbsKind code = Disc code           -- ^ sample
@@ -174,7 +200,8 @@ instance Pretty (PropKind code) where
                      
 instance Pretty (GradKind code) where
     ppr (HMC _ _ _ _) = text "HMC"
-    ppr (Reflect _) = text "Reflect"
+    ppr (NUTS _ _ _) = text "NUTS"
+    ppr (Reflect _ _ _ _) = text "Reflect"
 
 instance Pretty (GibbsKind code) where
     ppr (Disc _) = text "Disc"
@@ -202,7 +229,8 @@ mapCode f (Base kind ku fc allocs kernParams like) =
       GradProp gk ->
           case gk of
             HMC grad prop simLen stepSize -> Base (GradProp (HMC (f grad) (f prop) simLen stepSize)) ku fc allocs kernParams (f like)
-            Reflect grad -> Base (GradProp (Reflect (f grad))) ku fc allocs kernParams (f like)
+            NUTS grad prop stepSize -> Base (GradProp (NUTS (f grad) (f prop) stepSize)) ku fc allocs kernParams (f like)
+            Reflect grad prop simLen stepSize -> Base (GradProp (Reflect (f grad) (f prop) simLen stepSize)) ku fc allocs kernParams (f like)
       Gibbs gk ->
           case gk of
             Disc samp -> Base (Gibbs (Disc (f samp))) ku fc allocs kernParams (f like)
@@ -223,7 +251,8 @@ gatherCode (Base kind _ _ _ _ like) =
       GradProp gk ->
           case gk of
             HMC grad prop _ _ -> [ like, grad, prop ]
-            Reflect grad -> [ like, grad ]
+            NUTS grad prop _ -> [ like, grad, prop ]
+            Reflect grad prop _ _ -> [ like, grad, prop ]
       Gibbs gk ->
           case gk of
             Disc samp -> [ samp ]

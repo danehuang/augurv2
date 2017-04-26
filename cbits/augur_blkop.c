@@ -129,9 +129,7 @@ void h_augur_blk_dump(AugurMemLoc_t loc, AugurBlk_t* blk) {
 	break;
       }
       case TRUE: {
-	printf("BEFORE FLAT VEC DUMP\n");
 	h_augur_flat_vec_dump(loc, (AugurFlatVec_t*) blk->blks[i]);
-	printf("AFTER FLAT VEC DUMP\n");
 	break;
       }
       }
@@ -347,7 +345,7 @@ void h_augur_blk_mk_group(AugurBlk_t* dst, uint_t num_blks, AugurTyp_t* typs, vo
  * typs: the types of the objects in the block
  * blks: the objects in the block (gives the shape, assumed to be on HOST)
  */
-void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, AugurTyp_t* typs, void** blks) {
+void hi_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, Bool_t src_native, uint_t num_blks, AugurTyp_t* typs, void** blks) {
   uint_t numbytes;
   dst->native = TRUE;
   dst->num_blks = num_blks;
@@ -371,7 +369,12 @@ void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, Aug
     case AUGUR_VEC: {
       // NOTE: Allocate top-level structure on CPU
       AugurFlatVec_t* fvec = (AugurFlatVec_t*) augur_malloc(sizeof(AugurFlatVec_t), AUGUR_CPU);
-      h_augur_vec_to_native(loc, fvec, (AugurVec_t*) blks[i], FALSE);
+      if (src_native) {
+	h_augur_vec_to_native(loc, fvec, &((AugurFlatVec_t*) blks[i])->vec, FALSE);
+      }
+      else {
+	h_augur_vec_to_native(loc, fvec, (AugurVec_t*) blks[i], FALSE);
+      }
       dst->blks[i] = fvec;
       base_elems += fvec->base_elems;
       break;
@@ -391,6 +394,23 @@ void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, Aug
     }
   }
   dst->base_elems = base_elems;
+}
+
+
+/**
+ * Copy a block given a block that is on host. 
+ *
+ * dst: destination block
+ * num_blks: number of objects in the block 
+ * typs: the types of the objects in the block
+ * blks: the objects in the block (gives the shape, assumed to be on HOST)
+ */
+void h_augur_blk_mk_cpy(AugurMemLoc_t loc, AugurBlk_t* dst, uint_t num_blks, AugurTyp_t* typs, void** blks) {
+  hi_augur_blk_mk_cpy(loc, dst, FALSE, num_blks, typs, blks);
+}
+
+void h_augur_blk_mk_cpy2(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src) {
+  hi_augur_blk_mk_cpy(loc, dst, TRUE, src->num_blks, src->typs, src->blks);
 }
 
 void h_augur_blk_to_native(AugurMemLoc_t loc, AugurBlk_t* dst, AugurBlk_t* src, Bool_t f_cpy) {

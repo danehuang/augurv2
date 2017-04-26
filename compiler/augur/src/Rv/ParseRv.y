@@ -84,9 +84,11 @@ import Control.Monad.Except
 
   'MWG' { L _ RvT_MWG _ }
   'HMC' { L _ RvT_HMC _ }
+  'NUTS' { L _ RvT_NUTS _ }
   'DiscGibbs' { L _ RvT_DiscGibbs _ }
   'ConjGibbs' { L _ RvT_ConjGibbs _ }
   'ESlice' { L _ RvT_ESlice _ }
+  'RSlice' { L _ RvT_RSlice _ }
 
   DIST { L _ (RvT_Dist $$) _ }
   PRIM { L _ (RvT_Prim $$) _ }
@@ -131,11 +133,18 @@ atmker :
 | 'ConjGibbs' '[' VAR ']' { K.mkUserConjGibbs $3 }
 -- | 'ESlice' '[' VAR ']' { K.Base (K.Slice (K.Ellip () ())) (K.Single $3) (dirac $3 []) [] ()}
 | 'ESlice' '[' VAR ']' { K.mkUserESlice $3 }
+| 'RSlice' '[' vars ']' hmcsettings { K.mkUserRSlice $3 $5 }
+| 'NUTS' '[' vars ']' nutssettings { K.mkUserNUTS $3 $5 }
 
 
 hmcsettings :: { Maybe (Double, Double) }
 hmcsettings : {- Empty -} { Nothing }
             | '[' FLT ',' FLT ']' { Just ($2, $4) }
+
+nutssettings :: { Maybe Double }
+nutssettings : {- Empty -} { Nothing }
+             | '[' FLT ']' { Just $2 }
+
 
 propfoo :: { [(String, Gen String)] }
 propfoo : {- Empty -} { [] }

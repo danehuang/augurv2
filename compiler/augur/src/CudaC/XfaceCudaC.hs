@@ -194,6 +194,7 @@ emitPrim AtmIncMatVTMT = "augur_mat_atm_inc_vtmt"
 emitPrim PllSumVec = "augur_pll_sum_vec"
 emitPrim (EllipSlice _) = "augur_mcmc_eslice"
 emitPrim (LeapFrog _ _) = "h_augur_mcmc_hmc"
+emitPrim (ReflSlice _ _) = "h_augur_mcmc_refl_slice"
 emitPrim prim = compErr $ "Cannot emit primitive " ++ pprShow prim
 
             

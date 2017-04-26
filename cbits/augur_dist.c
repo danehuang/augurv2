@@ -80,6 +80,16 @@ __HOSTORDEV__ int augur_bernoulli_sample(augur_rng* rng, real_t bias) {
   }
 }
 
+int h_augur_bernoulli_sample(gsl_rng* rng, real_t bias) {
+  double u = gsl_rng_uniform(rng);
+  if (u < bias) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
+}
+
 
 /* Categorical */
 

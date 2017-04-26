@@ -155,9 +155,14 @@ rnKernKind (GradProp gk) =
           do code1' <- rnUserCode code1
              code2' <- rnUserCode code2
              return $ GradProp (HMC code1' code2' simLen stepSize)
-      Reflect code ->
-          do code' <- rnUserCode code
-             return $ GradProp (Reflect code')
+      NUTS code1 code2 stepSize ->
+          do code1' <- rnUserCode code1
+             code2' <- rnUserCode code2
+             return $ GradProp (NUTS code1' code2' stepSize)
+      Reflect code1 code2 simLen stepSize ->
+          do code1' <- rnUserCode code1
+             code2' <- rnUserCode code2
+             return $ GradProp (Reflect code1' code2' simLen stepSize)
 rnKernKind (Gibbs gk) =
     case gk of
       Disc code ->

@@ -9,7 +9,7 @@ NVCCFLAGS = -arch=sm_35 -Xcompiler -fPIC -O3
 GPUDIR = gpu
 
 
-OBJ = augur_blkop.o augur_dist.o augur_math.o augur_matop.o augur_rtmem.o augur_rtval.o augur_util.o augur_vecop.o 
+OBJ = augur_blkop.o augur_blkstk.o augur_dist.o augur_math.o augur_matop.o augur_rtmem.o augur_rtval.o augur_util.o augur_vecop.o 
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
