@@ -960,7 +960,7 @@ void hi_augur_vec_from_native(AugurMemLoc_t loc, AugurVec_t* dst, char** src_dat
     case AUGUR_GPU: {
       // Assume src_data is on host
       augur_memcpy(dst->data, *src_data, numbytes, AUGUR_H2H);
-      h_augur_vec_dump(AUGUR_CPU, dst);
+      // h_augur_vec_dump(AUGUR_CPU, dst);
       break;
     }
 #endif
