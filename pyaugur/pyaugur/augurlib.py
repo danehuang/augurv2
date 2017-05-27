@@ -366,7 +366,7 @@ class AugurInfer:
 
             AUGUR_IFACE_OBJ = op.join(self.workdir, 'augur_iface.o')
             LIBAUGUR_IFACE_OBJ = op.join(self.workdir, 'libaugur_iface.o')
-            augur_lib = [ 'augur_blkop.o', 'augur_dist.o', 'augur_math.o', 'augur_matop.o', 'augur_rtmem.o', 'augur_util.o', 'augur_rtval.o', 'augur_vecop.o' ]
+            augur_lib = [ 'augur_blkop.o', 'augur_dist.o', 'augur_math.o', 'augur_matop.o', 'augur_rtmem.o', 'augur_util.o', 'augur_rtval.o', 'augur_vecop.o', 'augur_blkstk.o' ]
             augur_lib_p = map(lambda obj_file: op.join(self.augurdir, 'gpu', obj_file), augur_lib)
             logmsg('augur_gpu: ' + str(augur_lib_p))
 
