@@ -1,0 +1,8 @@
+os: osx
+augurdir: path/to/cbits
+libaugurdir: path/to/compiler 
+workingdir: /tmp
+incdir:
+    - /usr/local/include
+libdir: 
+    - /usr/local/lib
