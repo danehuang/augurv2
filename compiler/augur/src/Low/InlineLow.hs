@@ -51,9 +51,14 @@ Input must:
 -- == Types and operations
 
 type InlineM b = RWST InlineRdr [()] [Stmt b] CompM
-data InlineRdr = IR { ir_genSym :: GenSym }
+data InlineRdr = IR { ir_genSym :: GenSym
+                    , ir_inLoop :: Bool }
 
 
+withInLoop :: (TypedVar b Typ) => Bool -> InlineM b a -> InlineM b a
+withInLoop inLoop =
+    local (\rdr -> rdr { ir_inLoop = inLoop })
+               
 freshId :: (TypedVar b Typ) => Name -> IdKind -> Typ -> InlineM b b
 freshId name ik ty =
     do genSym <- asks ir_genSym
@@ -83,7 +88,7 @@ inlineDirichlet dop dm es =
           do x <- freshId Anon Local IntTy
              y <- freshId Anon Local (tyOf (es !! 0))
              let gen = Until 0 (Call (PrimId DM_Mem PM_Fn SizeVec) [ es !! 1 ])
-                 e1 = Proj (es !! 0) [ Var x ]
+                 e1 = Proj (es !! 2) [ Var x ]
                  e2 = Proj (es !! 1) [ Var x ]
                  e_samp = DistOp Sample dm Gamma [ e1 + e2, Lit (Real 1.0) ]
                  s_ass = Assign y (es !! 0)
@@ -149,11 +154,19 @@ inlinePrim dop pm prim es =
 inlineExp :: (TypedVar b Typ) => Exp b -> InlineM b (Exp b)
 inlineExp (Var x) = return $ Var x
 inlineExp (Lit lit) = return $ Lit lit
-inlineExp (DistOp dop dm dist es) = inlineDist dop dm dist es
+inlineExp (DistOp dop dm dist es) =
+    do inLoop <- asks ir_inLoop
+       if inLoop
+       then inlineDist dop dm dist es
+       else return $ DistOp dop dm dist es
 inlineExp (Call ce es) = 
     case ce of
       FnId _ -> error $ "[Low.InlineLow] | TODO"
-      PrimId dop pm prim -> inlinePrim dop pm prim es
+      PrimId dop pm prim ->
+          do inLoop <- asks ir_inLoop
+             if inLoop
+             then inlinePrim dop pm prim es
+             else return $ Call (PrimId dop pm prim) es
 inlineExp (Proj e es) = return $ Proj e es
 
 
@@ -189,10 +202,10 @@ inlineStmt (If e s1 s2) =
        s2' <- inlineStmt s2
        return $ If e s1' s2'
 inlineStmt (Loop lk x gen s) = 
-    do s' <- inlineStmt s
+    do s' <- withInLoop True (inlineStmt s)
        return $ Loop lk x gen s'
 inlineStmt (MapRed acc x gen s e) = 
-    do s' <- inlineStmt s
+    do s' <- withInLoop True (inlineStmt s)
        return $ MapRed acc x gen s' e
 
 
@@ -216,6 +229,6 @@ runInlineStmt cinfo s =
 runInlineDecl :: (TypedVar b Typ) => CompInfo -> CompOpt -> InferCtx b -> Decl b -> CompM (Decl b)
 runInlineDecl cinfo copt inferCtx decl =
     do let genSym = getGenSym cinfo
-       (decl', _, _) <- runRWST (inlineDecl decl) (IR genSym) []
+       (decl', _, _) <- runRWST (inlineDecl decl) (IR genSym False) []
        decl'' <- runProjDecl cinfo copt inferCtx decl'
        runLint copt decl'' (Lint.runLintDecl cinfo False inferCtx)

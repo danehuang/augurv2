@@ -574,6 +574,7 @@ cgDeclBlk cinfo copt inferCtx rtSizeCtx useProp onDev decl =
            paramTyCtx = Map.fromList params
            allocTyCtx = Map.fromList (map (\x -> (x, getType' x)) allocs)
            openCtx = paramTyCtx `Map.union` allocTyCtx
+                     
        lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | Blocks:\n" ++ pprShowLs' comps
        comps' <- if getSplitOnLoop copt
                  then mapM (\comp -> lift $ runSplitComp cinfo copt inferCtx rtSizeCtx openCtx comp) comps >>= return . concat
@@ -587,10 +588,17 @@ cgDeclBlk cinfo copt inferCtx rtSizeCtx useProp onDev decl =
            allocs' = allocs ++ Map.keys shpCtx
        modify (\st -> st { cs_shpCtx = shpCtx `Map.union` cs_shpCtx st })
        lift $ debugM "[CudaC.CgCuda]" $ "@cgDeclBlk | SplitAtmInc:\n" ++ pprShowLs' comps''
+       (calls, decls) <- mapM (cgCallAndKern inferCtx useProp name allocs' params onDev) comps'' >>= return . unzip
+
+       {-
+       let allocs' = allocs
+       (calls, decls) <- mapM (cgCallAndKern inferCtx useProp name allocs params onDev) comps >>= return . unzip
+       -}
+
        let idxs = map fst (filter (isGridIdx . idKind . fst) params)
        s_projIdx <- cgProjIdx idxs
        params' <- cgParams useProp params
-       (calls, decls) <- mapM (cgCallAndKern inferCtx useProp name allocs' params onDev) comps'' >>= return . unzip
+
        retExp' <- T.mapM cgExp retExp 
        let retTy' = cgTyp Param retTy
            attribs' = if onDev then [C.Device] else []

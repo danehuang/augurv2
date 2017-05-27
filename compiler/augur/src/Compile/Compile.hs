@@ -313,7 +313,11 @@ compile model infer rtSizes target =
     do -- handle <- initCompLogger
        genSym <- lift $ newGenSym
        let cinfo = CompInfo genSym
-           copt = CompOpt True target True True True
+           copt = CompOpt { f_lint = True
+                          , getTarget = target
+                          , getInline = True
+                          , getSplitOnLoop = True
+                          , getSplitOnAtmInc = True }
        (modDecls, dupCtx, fn, kern, rtSizes') <- frontend cinfo model infer rtSizes
        let tlDepG = depTopLevel fn
        debugM "[Compile.Compile]" $ " | Top-level dependencies: " ++ pprShow tlDepG
